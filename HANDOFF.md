@@ -18,6 +18,10 @@ Open-world vehicle action-RPG starring **Stinky the Slime** (@stinkycubert):
 - Quests, dialogue, scrap, boss **Warlord Reek**
 - Castles on hard-flat **FORT_PADS** + foundations (no floating keeps)
 - **Safe zones** (green rings) for fast HP / stink regen
+- **Quest scrap caches** grounded + glowing beacons; gold minimap blips on `get_wheels`
+- **Destructible fort pieces** (towers/cannons/keep) — fortress damage fantasy
+- **Taco boost** power-up (speed + jump juice)
+- **Crew roster** (`crew.ts`) — Stinky + 6 unlock slots for future select
 - Mobile touch: stick · FIRE/JUMP/DRIFT/SPRINT · BRAKE/GAS · CAM
 
 ---
@@ -52,6 +56,7 @@ Platform revive helper: `startup.sh` probes `:8080` then starts `npm run dev` if
 | `src/game/visualDensity.ts` | Layer-4 materials, contact shadows |
 | `src/game/audio.ts` | WebAudio SFX + music bus |
 | `src/game/quests.ts` | Quest order + story beats |
+| `src/game/crew.ts` | Stinky + 6 crew slots (data for future select / SFX-VFX packs) |
 | `src/game/settings.ts` | Bindings, volumes, **autoAccel default false** |
 | `src/game/types.ts` | HudSnapshot, phases, colors |
 | `src/game/collision.ts` | Sphere / AABB helpers |
@@ -74,6 +79,10 @@ Platform revive helper: `startup.sh` probes `:8080` then starts `npm run dev` if
 10. **Safe zones:** `SAFE_ZONES` in openWorld; regen multiplier in engine.
 11. **HUD:** nothing covers play-critical chrome. Dialogue mid-screen; bottom chrome **hidden** while dialogue open. Boss bar only when near Reek or he is damaged.
 12. **Lighting:** controlled weak PMREM; avoid global haze / excess env intensity.
+13. **Scrap caches:** 3 quest caches near Scrap Beacon with glow spikes + bob; re-grounded every frame; gold dots on minimap during `get_wheels`. Never clip under terrain.
+14. **Fortress fantasy:** Reek outer towers/cannons/keep are damageable (`fort_piece` / `fort_cannon` / `throne`). Smash for breach announcements + taco drops.
+15. **Taco boost:** temporary max-speed + jump multiplier; air particle trail while boosted.
+16. **Crew slots:** `CREW` array slot 0 live; slots 1–6 reserved (Coach Blorp, Pete, Goo Mercy, Spike Rind, Nana Drift, Ash Korus).
 
 ---
 

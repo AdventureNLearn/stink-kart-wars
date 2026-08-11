@@ -254,6 +254,52 @@ function groundAt(x: number, z: number, lift = 0): number {
   return terrainHeight(x, z) + lift;
 }
 
+/** Quest scrap cache — glowing crate + beacon so it never "disappears" into terrain. */
+function createScrapCacheMesh(questCritical: boolean): THREE.Group {
+  const g = new THREE.Group();
+  g.name = questCritical ? "ScrapCacheQuest" : "ScrapCache";
+  const crateMat = mat(0xd4a020, {
+    emissive: 0xaa7700,
+    emissiveIntensity: questCritical ? 0.85 : 0.45,
+    metalness: 0.55,
+    roughness: 0.4,
+  });
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.15, 1.6), crateMat);
+  crate.position.y = 0.58;
+  crate.castShadow = true;
+  crate.receiveShadow = true;
+  g.add(crate);
+  // Lid
+  const lid = new THREE.Mesh(
+    new THREE.BoxGeometry(1.7, 0.18, 1.7),
+    mat(0xf0c040, { emissive: 0xcc8800, emissiveIntensity: 0.5, metalness: 0.4 }),
+  );
+  lid.position.y = 1.22;
+  g.add(lid);
+  // Vertical beacon spike so caches read at distance
+  const spike = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.18, questCritical ? 4.2 : 2.4, 8),
+    mat(0xffcc33, {
+      emissive: 0xffaa00,
+      emissiveIntensity: questCritical ? 1.2 : 0.6,
+      metalness: 0.3,
+    }),
+  );
+  spike.position.y = questCritical ? 3.2 : 2.2;
+  spike.name = "scrapBeacon";
+  g.add(spike);
+  // Halo ring
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.1, 0.08, 6, 20),
+    mat(0xffdd55, { emissive: 0xffaa00, emissiveIntensity: 0.9, transparent: true, opacity: 0.85 }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.15;
+  ring.name = "scrapRing";
+  g.add(ring);
+  return g;
+}
+
 export function buildOpenWorld(
   detail: "low" | "medium" | "high" = "high",
 ): OpenWorld {
@@ -496,34 +542,40 @@ export function buildOpenWorld(
     }
   }
 
-  // Scrap caches
-  for (const [x, z] of [
-    [18, 105],
-    [-24, 82],
-    [10, 120],
-    [-42, 100],
-    [38, 75],
-  ] as const) {
-    const y = terrainHeight(x, z) + 0.7;
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(1.8, 1.3, 1.8),
-      mat(0xc4a035, { emissive: 0x886600, emissiveIntensity: 0.4, metalness: 0.5 }),
-    );
-    mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    pushObj({
-      kind: "scrap",
-      x,
-      y,
-      z,
-      yaw: 0,
-      hp: 1,
-      maxHp: 1,
-      solid: false,
-      radius: 1.5,
-      mesh,
-      tag: "scrap_cache",
-    });
+  // Scrap caches — 3 quest-critical near beacon (always findable) + 2 bonus
+  // Grounded with physics-compensated lift so they never clip into terrain.
+  {
+    const questCaches: [number, number][] = [
+      [14, 108],
+      [-16, 100],
+      [8, 85],
+    ];
+    const bonusCaches: [number, number][] = [
+      [-42, 100],
+      [38, 75],
+    ];
+    let qi = 0;
+    for (const [x, z] of [...questCaches, ...bonusCaches]) {
+      const baseY = groundAt(x, z, 0);
+      const mesh = createScrapCacheMesh(qi < 3);
+      // Mesh origin at crate base — sit on terrain with small clearance
+      mesh.position.set(x, baseY + 0.05, z);
+      const isQuest = qi < 3;
+      pushObj({
+        kind: "scrap",
+        x,
+        y: baseY + 1.1,
+        z,
+        yaw: qi * 0.7,
+        hp: 1,
+        maxHp: 1,
+        solid: false,
+        radius: 2.2,
+        mesh,
+        tag: isQuest ? "scrap_cache_quest" : "scrap_cache",
+      });
+      qi++;
+    }
   }
 
   // ── Reek Fortress Castle (Throne Mesa) ──
@@ -541,26 +593,52 @@ export function buildOpenWorld(
     addCastleFoundation(group, cx, cz, y, 30, "reek");
     const castle = createCastleMesh(1.15, "reek");
     castle.position.set(cx, y, cz);
+    // Keep main keep tough but damageable (staged fortress fantasy)
     pushObj({
       kind: "castle",
       x: cx,
       y: y + 8,
       z: cz,
       yaw: 0,
-      hp: 9999,
-      maxHp: 9999,
+      hp: 4200,
+      maxHp: 4200,
       solid: true,
       radius: 28,
       aabb: aabbFromCenter(cx, y + 8, cz, 26, 12, 26),
       mesh: castle,
       tag: "throne",
     });
-    // wall cannons around fortress
+    // Destructible outer wall towers — player can "blow the fortress up"
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + 0.2;
+      const px = cx + Math.cos(a) * 32;
+      const pz = cz + Math.sin(a) * 32;
+      const py = groundAt(px, pz, 0);
+      const tower = createWatchtowerMesh();
+      tower.position.set(px, py, pz);
+      tower.scale.setScalar(0.85);
+      tower.rotation.y = a;
+      pushObj({
+        kind: "tower",
+        x: px,
+        y: py + 6,
+        z: pz,
+        yaw: a,
+        hp: 160,
+        maxHp: 160,
+        solid: true,
+        radius: 3.2,
+        aabb: aabbFromCenter(px, py + 6, pz, 2.8, 6, 2.8),
+        mesh: tower,
+        tag: "fort_piece",
+      });
+    }
+    // wall cannons around fortress — smashable
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       const px = cx + Math.cos(a) * 38;
       const pz = cz + Math.sin(a) * 38;
-      const py = terrainHeight(px, pz);
+      const py = groundAt(px, pz, 0);
       const cannon = createCannonMesh(i % 3 === 0 ? "siege" : "field");
       cannon.position.set(px, py, pz);
       cannon.rotation.y = a + Math.PI;
@@ -570,8 +648,8 @@ export function buildOpenWorld(
         y: py + 1,
         z: pz,
         yaw: a + Math.PI,
-        hp: 90,
-        maxHp: 90,
+        hp: 110,
+        maxHp: 110,
         solid: true,
         radius: 2.5,
         aabb: aabbFromCenter(px, py + 1, pz, 2, 1.5, 2.5),

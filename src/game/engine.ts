@@ -88,7 +88,7 @@ type Pickup = {
   mesh: THREE.Object3D;
   x: number;
   z: number;
-  kind: "scrap" | "hp" | "stink";
+  kind: "scrap" | "hp" | "stink" | "taco";
   life: number;
 };
 
@@ -146,6 +146,8 @@ export class KartEngine {
     sprintMeter: 1,
     bank: 0,
     deadTimer: 0,
+    /** Taco power-up remaining seconds (speed + jump juice). */
+    tacoBoost: 0,
   };
 
   enemies: Enemy[] = [];
@@ -180,6 +182,7 @@ export class KartEngine {
   private boss: Enemy | null = null;
   private scrapCollected = 0;
   private generatorsDown = 0;
+  private fortPiecesDown = 0;
   private storyFlags = new Set<string>();
   private canvas: HTMLCanvasElement;
   private pmrem?: THREE.PMREMGenerator;
@@ -599,6 +602,7 @@ export class KartEngine {
     this.storyFlags.clear();
     this.scrapCollected = 0;
     this.generatorsDown = 0;
+    this.fortPiecesDown = 0;
     this.player.xp = 0;
     this.player.level = 1;
     this.player.scrap = 0;
@@ -607,6 +611,7 @@ export class KartEngine {
     this.player.maxStink = 100;
     this.player.weaponSlot = 1;
     this.player.weaponCd = 0;
+    this.player.tacoBoost = 0;
     this.resetPlayer(0, 0);
     this.spawnArmy();
     this.openDialogue("intro");
@@ -854,6 +859,7 @@ export class KartEngine {
     if (this.player.skillCd > 0) this.player.skillCd -= dt;
     if (this.player.stinkCd > 0) this.player.stinkCd -= dt;
     if (this.player.weaponCd > 0) this.player.weaponCd -= dt;
+    if (this.player.tacoBoost > 0) this.player.tacoBoost -= dt;
     const safe = this.activeSafeZone();
     const regenMul = safe?.regenMul ?? 1;
     this.player.stink = Math.min(
@@ -882,6 +888,16 @@ export class KartEngine {
         o.kind === "generator"
       ) {
         o.mesh.rotation.y += dt * 1.1;
+      }
+      // Scrap caches: re-ground every frame + bob/spin so they never clip or vanish
+      if (o.kind === "scrap") {
+        const gy = this.world.groundY(o.x, o.z);
+        const bob = Math.sin(performance.now() * 0.003 + o.x) * 0.18;
+        o.y = gy + 1.1 + bob;
+        o.mesh.position.set(o.x, gy + 0.05 + bob * 0.4, o.z);
+        o.mesh.rotation.y += dt * 0.9;
+        const ring = o.mesh.getObjectByName("scrapRing");
+        if (ring) ring.rotation.z += dt * 2.2;
       }
     }
 
@@ -935,8 +951,11 @@ export class KartEngine {
       p.sprintMeter = Math.min(1, p.sprintMeter + 0.14 * dt);
     }
 
-    const maxSpeed = (42 + p.level * 1.8) * (p.sprint ? 1.45 : 1);
-    const accel = 48 * (p.sprint ? 1.25 : 1);
+    const maxSpeed =
+      (42 + p.level * 1.8) *
+      (p.sprint ? 1.45 : 1) *
+      (p.tacoBoost > 0 ? 1.28 : 1);
+    const accel = 48 * (p.sprint ? 1.25 : 1) * (p.tacoBoost > 0 ? 1.15 : 1);
     const thr = throttle;
     // Forward / hard-brake / reverse gear — BRAKE and S reverse properly
     if (thr > 0.05) {
@@ -983,8 +1002,9 @@ export class KartEngine {
 
     // ── Jump / stomp vertical physics ──
     const groundY = this.world.groundY(p.x, p.z) + RIDE_HEIGHT;
-    const JUMP_VY = 13.5;
-    const GRAVITY = 32;
+    const tacoMul = p.tacoBoost > 0 ? 1.22 : 1;
+    const JUMP_VY = 15.8 * tacoMul;
+    const GRAVITY = 30;
     // Engine-side hop edge (survives double-sample / dialogue Space)
     const hopEdge = (input.hopHeld && !this.prevHopHeld) || input.hop;
     this.prevHopHeld = !!input.hopHeld;
@@ -993,11 +1013,11 @@ export class KartEngine {
       p.airborne = true;
       p.jumpLock = true;
       gameAudio.playHop();
-      this.particles.emit(p.x, p.y, p.z, 10, {
-        color: 0xc45c2a,
-        speed: 4,
-        life: 0.35,
-        vy: 3,
+      this.particles.emit(p.x, p.y, p.z, 14, {
+        color: p.tacoBoost > 0 ? 0xffcc44 : 0xc45c2a,
+        speed: 5,
+        life: 0.4,
+        vy: 4,
       });
     }
     if (!input.hopHeld && !p.airborne) p.jumpLock = false;
@@ -1005,15 +1025,25 @@ export class KartEngine {
     if (p.airborne) {
       p.vy -= GRAVITY * dt;
       p.y += p.vy * dt;
+      // Air trail juice
+      if (Math.random() < dt * 18) {
+        this.particles.emit(p.x, p.y - 0.3, p.z, 1, {
+          color: p.tacoBoost > 0 ? 0xffdd66 : 0x8dff9e,
+          speed: 1.2,
+          life: 0.35,
+          size: 0.18,
+          vy: 0.5,
+        });
+      }
       if (p.y <= groundY && p.vy <= 0) {
         p.y = groundY;
         p.vy = 0;
         p.airborne = false;
-        this.particles.emit(p.x, p.y, p.z, 6, {
+        this.particles.emit(p.x, p.y, p.z, 8, {
           color: 0x8a6040,
-          speed: 2.5,
-          life: 0.25,
-          vy: 1.2,
+          speed: 3,
+          life: 0.28,
+          vy: 1.5,
         });
       }
     } else {
@@ -1049,7 +1079,16 @@ export class KartEngine {
         sphere.x = p.x;
         sphere.z = p.z;
         p.speed *= 0.78;
-        if (Math.abs(p.speed) > 16 && o.hp < 9000) {
+        if (
+          Math.abs(p.speed) > 14 &&
+          o.hp < 9000 &&
+          (o.tag === "fort_piece" ||
+            o.tag === "fort_cannon" ||
+            o.tag === "throne" ||
+            o.hp < 500)
+        ) {
+          this.damageObject(o, 18 + Math.abs(p.speed) * 0.45);
+        } else if (Math.abs(p.speed) > 16 && o.hp < 9000) {
           this.damageObject(o, 15 + Math.abs(p.speed) * 0.35);
         }
       }
@@ -1123,17 +1162,22 @@ export class KartEngine {
 
     for (const o of this.world.objects) {
       if (!o.alive || o.kind !== "scrap") continue;
-      if (Math.hypot(o.x - p.x, o.z - p.z) < 3.5) {
+      // Generous radius during get_wheels so the 3rd cache always feels fair
+      const onScrapQuest = this.activeQuest()?.id === "get_wheels";
+      const pickR = onScrapQuest ? 5.2 : 3.8;
+      if (Math.hypot(o.x - p.x, o.z - p.z) < pickR) {
         o.alive = false;
         o.mesh.visible = false;
         this.scrapCollected++;
         this.player.scrap += 8;
         this.bumpQuest("get_wheels");
         gameAudio.playItemGet();
-        this.particles.emit(o.x, o.y, o.z, 12, {
+        this.announce = `SCRAP ${Math.min(3, this.scrapCollected)}/3`;
+        this.announceTimer = 1.1;
+        this.particles.emit(o.x, o.y, o.z, 16, {
           color: 0xffcc33,
-          speed: 4,
-          life: 0.5,
+          speed: 5,
+          life: 0.55,
         });
       }
     }
@@ -1700,6 +1744,11 @@ export class KartEngine {
             this.player.maxStink,
             this.player.stink + 45,
           );
+        } else if (pk.kind === "taco") {
+          this.player.tacoBoost = Math.max(this.player.tacoBoost, 12);
+          this.player.hp = Math.min(this.player.maxHp, this.player.hp + 15);
+          this.announce = "TACO BOOST!";
+          this.announceTimer = 1.4;
         } else {
           this.player.scrap += 5;
         }
@@ -1784,19 +1833,60 @@ export class KartEngine {
   }
 
   private damageObject(o: WorldObject, amount: number) {
+    // Invincible props only (beacon, main landscape markers with 9000+)
     if (!o.alive || o.hp >= 9000) return;
     o.hp -= amount;
-    this.particles.emit(o.x, o.y, o.z, 8, {
+    // Staged visual damage — darken mesh as HP drops
+    const ratio = Math.max(0, o.hp / o.maxHp);
+    o.mesh.traverse((ch) => {
+      const m = ch as THREE.Mesh;
+      if (m.isMesh && m.material && "emissive" in (m.material as object)) {
+        const mat = m.material as THREE.MeshStandardMaterial;
+        if (mat.emissive) {
+          mat.emissiveIntensity = Math.max(0.05, (mat.emissiveIntensity || 0.3) * 0.92);
+        }
+        if (ratio < 0.45 && mat.color) {
+          mat.color.offsetHSL(0, -0.05, -0.04);
+        }
+      }
+    });
+    this.particles.emit(o.x, o.y, o.z, 10, {
       color: 0xffaa44,
-      speed: 4,
-      life: 0.35,
+      speed: 5,
+      life: 0.4,
     });
     if (o.hp <= 0) {
       o.alive = false;
       o.mesh.visible = false;
       gameAudio.playExplosion();
-      this.explode(o.x, o.y, o.z, 4, 10, "player");
+      const blast =
+        o.tag === "fort_piece" || o.tag === "fort_cannon" || o.tag === "throne"
+          ? 7
+          : 4;
+      this.explode(o.x, o.y, o.z, blast, 14, "player");
       this.dropLoot(o.x, o.z);
+      // Fortress fantasy feedback
+      if (o.tag === "fort_piece" || o.tag === "fort_cannon") {
+        this.fortPiecesDown = (this.fortPiecesDown ?? 0) + 1;
+        if (this.fortPiecesDown === 1) {
+          this.announce = "FORTRESS BREACHED!";
+          this.announceTimer = 1.8;
+        } else if (this.fortPiecesDown === 4) {
+          this.announce = "REEK FORTRESS CRUMBLING!";
+          this.announceTimer = 2;
+        } else if (this.fortPiecesDown >= 8) {
+          this.announce = "FORTRESS GUTTED — FIND REEK!";
+          this.announceTimer = 2.2;
+        }
+        // Chance to drop taco after fort smash
+        if (Math.random() < 0.35) this.spawnTaco(o.x, o.z);
+      }
+      if (o.tag === "throne") {
+        this.announce = "KEEP DESTROYED!";
+        this.announceTimer = 2.5;
+        this.spawnTaco(o.x, o.z);
+        this.spawnTaco(o.x + 4, o.z - 3);
+      }
       if (o.tag === "generator") {
         this.generatorsDown++;
         this.bumpQuest("slime_outpost");
@@ -1813,9 +1903,20 @@ export class KartEngine {
   }
 
   private dropLoot(x: number, z: number) {
-    if (Math.random() > 0.6) return;
-    const kind =
-      Math.random() < 0.4 ? "hp" : Math.random() < 0.7 ? "stink" : "scrap";
+    if (Math.random() > 0.55) return;
+    const roll = Math.random();
+    const kind: Pickup["kind"] =
+      roll < 0.12
+        ? "taco"
+        : roll < 0.45
+          ? "hp"
+          : roll < 0.78
+            ? "stink"
+            : "scrap";
+    if (kind === "taco") {
+      this.spawnTaco(x, z);
+      return;
+    }
     const mesh = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.55, 0),
       new THREE.MeshStandardMaterial({
@@ -1829,6 +1930,36 @@ export class KartEngine {
     mesh.position.set(x, this.world.groundY(x, z) + 1, z);
     this.scene.add(mesh);
     this.pickups.push({ mesh, x, z, kind, life: 22 });
+  }
+
+  private spawnTaco(x: number, z: number) {
+    const g = new THREE.Group();
+    // Simple taco: shell + filling
+    const shell = new THREE.Mesh(
+      new THREE.TorusGeometry(0.55, 0.22, 8, 12, Math.PI),
+      new THREE.MeshStandardMaterial({
+        color: 0xe8a838,
+        emissive: 0xaa6600,
+        emissiveIntensity: 0.45,
+        roughness: 0.55,
+      }),
+    );
+    shell.rotation.x = Math.PI / 2;
+    shell.rotation.z = Math.PI;
+    g.add(shell);
+    const fill = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.25, 0.35),
+      new THREE.MeshStandardMaterial({
+        color: 0x3dcc5a,
+        emissive: 0x1f8a35,
+        emissiveIntensity: 0.5,
+      }),
+    );
+    fill.position.y = 0.12;
+    g.add(fill);
+    g.position.set(x, this.world.groundY(x, z) + 1.1, z);
+    this.scene.add(g);
+    this.pickups.push({ mesh: g, x, z, kind: "taco", life: 28 });
   }
 
   private checkQuestTriggers() {
@@ -1949,6 +2080,21 @@ export class KartEngine {
       ctx.arc(tx(lm.x), ty(lm.z), 5, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Quest scrap caches — gold blips so the 3rd is never lost
+    const scrapQuest = this.activeQuest()?.id === "get_wheels";
+    for (const o of this.world.objects) {
+      if (!o.alive || o.kind !== "scrap") continue;
+      if (!scrapQuest && o.tag !== "scrap_cache_quest") continue;
+      ctx.fillStyle = "#ffcc33";
+      ctx.beginPath();
+      ctx.arc(tx(o.x), ty(o.z), scrapQuest ? 4 : 3, 0, Math.PI * 2);
+      ctx.fill();
+      if (scrapQuest) {
+        ctx.strokeStyle = "#fff6a0";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
     for (const e of this.enemies) {
       if (!e.alive) continue;
       ctx.fillStyle = e.isBoss
@@ -1993,7 +2139,11 @@ export class KartEngine {
       kills: this.player.kills,
       questTitle: def?.title ?? "All quests complete",
       questObjective: def?.objective ?? "Dominate the ZeroVerse battlefield.",
-      questProgress: q ? `${q.progress}/${q.target}` : "—",
+      questProgress: q
+        ? q.id === "get_wheels"
+          ? `${q.progress}/${q.target} · gold crates on map`
+          : `${q.progress}/${q.target}`
+        : "—",
       announce: this.announce,
       dialogue: this.dialogue ? this.dialogue.lines[this.dialogue.i]! : null,
       dialogueSpeaker: this.dialogue?.speaker ?? null,

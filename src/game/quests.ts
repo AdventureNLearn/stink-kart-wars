@@ -27,7 +27,7 @@ export const QUESTS: Record<QuestId, QuestDef> = {
     chapter: 1,
     blurb:
       "Coach Blorp wires boosters into your kart. 'World's ending. Try not to die cute.'",
-    objective: "Collect 3 Scrap Caches around the beacon ruins",
+    objective: "Collect 3 glowing Scrap Caches near the beacon (gold on minimap)",
     rewardXp: 60,
     rewardScrap: 25,
   },

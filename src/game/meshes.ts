@@ -134,16 +134,38 @@ export function createStinkyKart(): THREE.Group {
   engine.name = "engineGlow";
   engine.castShadow = true;
   kart.add(engine);
-  // Exhaust nozzles micro-detail
-  for (const x of [-0.22, 0.22]) {
-    const nozzle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.1, 0.2, 8),
-      metalPlate(0x222830),
+  // Dual exhaust pipes (Slimekart silhouette)
+  for (const x of [-0.28, 0.28]) {
+    const pipe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1, 0.12, 0.85, 8),
+      metalPlate(0x2a3038, 0.4),
     );
-    nozzle.rotation.x = Math.PI / 2;
-    nozzle.position.set(x, 0.42, 1.22);
-    kart.add(nozzle);
+    pipe.rotation.x = Math.PI / 2;
+    pipe.position.set(x, 0.48, 1.35);
+    pipe.castShadow = true;
+    kart.add(pipe);
+    const tip = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.1, 0.18, 8),
+      quantumMat,
+    );
+    tip.rotation.x = Math.PI / 2;
+    tip.position.set(x, 0.48, 1.78);
+    tip.name = "exhaustTip";
+    kart.add(tip);
   }
+  // SLIMEKART nose badge
+  const badge = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 0.22, 0.08),
+    purpleMat,
+  );
+  badge.position.set(0, 0.55, -1.12);
+  kart.add(badge);
+  const badgeGlow = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 0.1, 0.06),
+    quantumMat,
+  );
+  badgeGlow.position.set(0, 0.55, -1.16);
+  kart.add(badgeGlow);
 
   // Side pods
   for (const sx of [-0.95, 0.95]) {
@@ -357,6 +379,31 @@ export function createStinkyBody(): THREE.Group {
     );
     bicep.position.set(ax * 0.85, 0.6, 0.05);
     g.add(bicep);
+  }
+
+  // Hoodie torso shell (Slimekart identity — purple/blue jacket vibe)
+  const hoodie = new THREE.Mesh(
+    new THREE.SphereGeometry(0.52, 12, 12),
+    paintBody(0x2a3d8a, {
+      roughness: 0.55,
+      metalness: 0.08,
+      emissive: 0x0a1030,
+      emissiveIntensity: 0.15,
+    }),
+  );
+  hoodie.scale.set(1.05, 0.85, 0.95);
+  hoodie.position.y = 0.58;
+  hoodie.name = "hoodie";
+  g.add(hoodie);
+  // Hoodie sleeves tips
+  for (const ax of [-0.52, 0.52]) {
+    const cuff = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12, 0.03, 6, 10),
+      paintBody(0x1a2858, { roughness: 0.6 }),
+    );
+    cuff.position.set(ax, 0.42, 0.05);
+    cuff.rotation.z = Math.PI / 2;
+    g.add(cuff);
   }
 
   // Mohawk spikes
