@@ -51,7 +51,7 @@ export const ACTION_LABELS: Record<ControlAction, string> = {
   brake: "Brake / Reverse",
   steerLeft: "Steer Left",
   steerRight: "Steer Right",
-  hop: "Hop",
+  hop: "Jump / Stomp",
   drift: "Drift (hold)",
   useItem: "Use Item",
   skill: "Ooze Overdrive",
@@ -69,7 +69,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   detail: "high",
   cameraShake: true,
   showFps: false,
-  autoAccel: false,
+  autoAccel: true,
   bindings: { ...DEFAULT_BINDINGS },
   worldId: "wastes",
 };
