@@ -11,10 +11,19 @@ export class GameAudio {
   private engineFilter: BiquadFilterNode | null = null;
   private musicNodes: AudioNode[] = [];
   private musicPlaying = false;
-  /** Looping playlist from public/audio (decoded via HTMLAudioElement). */
+  /** OST playlist URLs (loop Rider → Carousel → …). */
+  private readonly ostUrls = [
+    "/audio/Slime_Rider.mp3",
+    "/audio/Slime_Carousel.mp3",
+  ];
+  private ostBuffers: AudioBuffer[] = [];
+  private ostLoading: Promise<void> | null = null;
+  private ostSource: AudioBufferSourceNode | null = null;
+  private ostIdx = 0;
+  /** HTMLAudio fallback when decode fails. */
   private trackEls: HTMLAudioElement[] = [];
   private trackIdx = 0;
-  private usingFileMusic = false;
+  private musicWanted = false;
 
   masterVol = 0.8;
   sfxVol = 0.9;
@@ -56,12 +65,18 @@ export class GameAudio {
   }
 
   private applyVolumes() {
-    if (!this.master || !this.sfx || !this.music || !this.ctx) return;
-    const t = this.ctx.currentTime;
-    const m = this.mute ? 0 : this.masterVol * this.masterVol;
-    this.master.gain.setTargetAtTime(m, t, 0.02);
-    this.sfx.gain.setTargetAtTime(this.sfxVol * this.sfxVol, t, 0.02);
-    this.music.gain.setTargetAtTime(this.musicVol * this.musicVol, t, 0.02);
+    if (this.master && this.sfx && this.music && this.ctx) {
+      const t = this.ctx.currentTime;
+      const m = this.mute ? 0 : this.masterVol * this.masterVol;
+      this.master.gain.setTargetAtTime(m, t, 0.02);
+      this.sfx.gain.setTargetAtTime(this.sfxVol * this.sfxVol, t, 0.02);
+      // Linear music gain so OST is clearly audible
+      this.music.gain.setTargetAtTime(
+        this.mute ? 0 : this.musicVol * 0.85,
+        t,
+        0.02,
+      );
+    }
     this.applyTrackVolumes();
   }
 
@@ -326,85 +341,242 @@ export class GameAudio {
     return this.racing;
   }
 
-  /** Official OST loop: Slime_Rider → Slime_Carousel → repeat. */
-  private ensureTracks() {
-    if (this.trackEls.length) return;
-    const urls = ["/audio/Slime_Rider.mp3", "/audio/Slime_Carousel.mp3"];
-    this.trackEls = urls.map((src) => {
-      const a = new Audio(src);
-      a.preload = "auto";
-      a.loop = false; // playlist advances; full OST loops via onended
-      a.crossOrigin = "anonymous";
-      return a;
-    });
-  }
-
   private applyTrackVolumes() {
-    const vol = this.mute ? 0 : this.masterVol * this.musicVol;
-    for (const a of this.trackEls) a.volume = Math.max(0, Math.min(1, vol));
+    const vol = this.mute ? 0 : Math.max(0, Math.min(1, this.masterVol * this.musicVol));
+    for (const a of this.trackEls) a.volume = vol;
   }
 
-  private playTrackAt(idx: number) {
-    if (!this.musicPlaying || !this.trackEls.length) return;
-    // pause others
+  private ostBlobUrls: string[] = [];
+
+  private async preloadOstAssets(): Promise<void> {
+    if (this.ostBuffers.length === this.ostUrls.length && this.trackEls.length) {
+      return;
+    }
+    if (this.ostLoading) return this.ostLoading;
+    this.unlock();
+    const ctx = this.ctx!;
+    this.ostLoading = (async () => {
+      const buffers: AudioBuffer[] = [];
+      const els: HTMLAudioElement[] = [];
+      // Revoke old blobs
+      for (const u of this.ostBlobUrls) {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {
+          /* */
+        }
+      }
+      this.ostBlobUrls = [];
+
+      for (const url of this.ostUrls) {
+        try {
+          const res = await fetch(url, { cache: "force-cache" });
+          if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+          const raw = await res.arrayBuffer();
+          // WebAudio buffer
+          try {
+            const buf = await ctx.decodeAudioData(raw.slice(0));
+            buffers.push(buf);
+          } catch (err) {
+            console.warn("[ost] decode failed", url, err);
+          }
+          // HTMLAudio from blob (most reliable play() after gesture)
+          const blob = new Blob([raw], { type: "audio/mpeg" });
+          const blobUrl = URL.createObjectURL(blob);
+          this.ostBlobUrls.push(blobUrl);
+          const a = new Audio();
+          a.preload = "auto";
+          a.loop = false;
+          a.src = blobUrl;
+          a.setAttribute("playsinline", "true");
+          // Attach to DOM (some engines require it for autoplay)
+          a.style.display = "none";
+          if (typeof document !== "undefined") {
+            document.body.appendChild(a);
+          }
+          els.push(a);
+        } catch (err) {
+          console.warn("[ost] fetch failed", url, err);
+        }
+      }
+      this.ostBuffers = buffers;
+      // Replace HTML tracks
+      for (const old of this.trackEls) {
+        try {
+          old.pause();
+          old.remove();
+        } catch {
+          /* */
+        }
+      }
+      this.trackEls = els;
+      this.applyTrackVolumes();
+    })();
+    return this.ostLoading;
+  }
+
+  private ensureHtmlTracks() {
+    // Synchronous no-op — real load is preloadOstAssets()
+    if (!this.trackEls.length) {
+      // Placeholder silent elements until blobs ready
+      this.trackEls = this.ostUrls.map((src) => {
+        const a = new Audio(src);
+        a.preload = "auto";
+        a.loop = false;
+        return a;
+      });
+    }
+  }
+
+  private stopOstSource() {
+    if (this.ostSource) {
+      try {
+        this.ostSource.onended = null;
+        this.ostSource.stop();
+      } catch {
+        /* */
+      }
+      try {
+        this.ostSource.disconnect();
+      } catch {
+        /* */
+      }
+      this.ostSource = null;
+    }
+  }
+
+  private playOstBufferAt(idx: number) {
+    if (!this.musicWanted || !this.ctx || !this.music || !this.ostBuffers.length) return;
+    this.stopOstSource();
+    this.ostIdx =
+      ((idx % this.ostBuffers.length) + this.ostBuffers.length) %
+      this.ostBuffers.length;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.ostBuffers[this.ostIdx]!;
+    src.connect(this.music);
+    src.onended = () => {
+      if (!this.musicWanted) return;
+      this.playOstBufferAt(this.ostIdx + 1);
+    };
+    try {
+      src.start(0);
+      this.ostSource = src;
+      this.musicPlaying = true;
+    } catch (err) {
+      console.warn("[ost] buffer start failed", err);
+      this.playHtmlTrackAt(this.ostIdx);
+    }
+  }
+
+  private playHtmlTrackAt(idx: number) {
+    if (!this.musicWanted) return;
+    this.ensureHtmlTracks();
+    if (!this.trackEls.length) return;
     for (let i = 0; i < this.trackEls.length; i++) {
       const el = this.trackEls[i]!;
       if (i !== idx) {
-        el.pause();
         el.onended = null;
+        try {
+          el.pause();
+        } catch {
+          /* */
+        }
       }
     }
-    this.trackIdx = ((idx % this.trackEls.length) + this.trackEls.length) % this.trackEls.length;
+    this.trackIdx =
+      ((idx % this.trackEls.length) + this.trackEls.length) % this.trackEls.length;
     const a = this.trackEls[this.trackIdx]!;
     this.applyTrackVolumes();
-    a.currentTime = 0;
+    try {
+      a.currentTime = 0;
+    } catch {
+      /* */
+    }
     a.onended = () => {
-      if (!this.musicPlaying) return;
-      this.playTrackAt(this.trackIdx + 1);
+      if (!this.musicWanted) return;
+      this.playHtmlTrackAt(this.trackIdx + 1);
     };
-    void a.play().catch(() => {
-      /* autoplay may block until gesture — unlock() already ran */
+    const kick = () => {
+      const p = a.play();
+      if (p && typeof p.then === "function") {
+        void p
+          .then(() => {
+            this.musicPlaying = true;
+          })
+          .catch((err) => {
+            console.warn("[ost] html play blocked, retry", err);
+            window.setTimeout(() => {
+              if (!this.musicWanted) return;
+              void a.play()
+                .then(() => {
+                  this.musicPlaying = true;
+                })
+                .catch((e2) => console.warn("[ost] html play failed", e2));
+            }, 80);
+          });
+      } else {
+        this.musicPlaying = !a.paused;
+      }
+    };
+    // Always try immediately AND on canplay — first track often rs=0 initially
+    kick();
+    if (a.readyState < 3) {
+      a.addEventListener("canplaythrough", kick, { once: true });
+      a.addEventListener("loadeddata", kick, { once: true });
+      try {
+        a.load();
+      } catch {
+        /* */
+      }
+    }
+  }
+
+  /**
+   * Start OST playlist (autoplay). Call from the Enter/play click gesture.
+   * Fetches MP3s → blob URL HTMLAudio (instant play) + WebAudio buffers.
+   */
+  startMusic(_seed = 0) {
+    this.musicWanted = true;
+    this.unlock();
+    void this.ctx?.resume();
+    this.applyVolumes();
+
+    // Optimistic path: try direct URL while blobs load
+    this.ensureHtmlTracks();
+    this.playHtmlTrackAt(0);
+
+    void this.preloadOstAssets().then(() => {
+      if (!this.musicWanted) return;
+      // Prefer WebAudio buffers when ready (stable loop, no element quirks)
+      if (this.ostBuffers.length > 0) {
+        for (const a of this.trackEls) {
+          a.onended = null;
+          try {
+            a.pause();
+          } catch {
+            /* */
+          }
+        }
+        this.playOstBufferAt(0);
+        return;
+      }
+      // Else HTML blob elements
+      if (this.trackEls.length) {
+        this.playHtmlTrackAt(0);
+      }
     });
   }
 
-  startMusic(_seed = 0) {
-    if (!this.unlocked) this.unlock();
-    if (this.musicPlaying) return;
+  /** Force restart OST (e.g. user toggled music volume from 0). */
+  restartMusic() {
     this.stopMusic();
-    this.musicPlaying = true;
-    this.ensureTracks();
-    this.usingFileMusic = this.trackEls.length > 0;
-    if (this.usingFileMusic) {
-      this.playTrackAt(0);
-      return;
-    }
-    // Fallback procedural bed if files missing
-    if (!this.ctx || !this.music) return;
-    const ctx = this.ctx;
-    const t0 = ctx.currentTime + 0.05;
-    const notes = [130.81, 164.81, 196.0, 246.94, 261.63, 196.0, 164.81, 130.81];
-    const beat = 0.22;
-    for (let bar = 0; bar < 32; bar++) {
-      for (let i = 0; i < notes.length; i++) {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = bar % 2 === 0 ? "triangle" : "square";
-        const freq = notes[i % notes.length]! * (1 + (bar % 4) * 0.01);
-        const start = t0 + bar * notes.length * beat + i * beat;
-        o.frequency.value = freq;
-        g.gain.setValueAtTime(0.0001, start);
-        g.gain.exponentialRampToValueAtTime(0.05, start + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, start + beat * 0.9);
-        o.connect(g);
-        g.connect(this.music!);
-        o.start(start);
-        o.stop(start + beat);
-        this.musicNodes.push(o, g);
-      }
-    }
+    this.startMusic();
   }
 
   stopMusic() {
+    this.musicWanted = false;
+    this.musicPlaying = false;
+    this.stopOstSource();
     for (const n of this.musicNodes) {
       try {
         if ("stop" in n) (n as OscillatorNode).stop();
@@ -422,12 +594,57 @@ export class GameAudio {
         /* */
       }
     }
-    this.musicPlaying = false;
+  }
+
+  isMusicPlaying() {
+    if (this.ostSource) return this.musicWanted;
+    if (this.trackEls.some((a) => !a.paused && a.currentTime > 0)) return true;
+    return this.musicPlaying || this.musicWanted;
+  }
+
+  debugMusic() {
+    return {
+      wanted: this.musicWanted,
+      playing: this.musicPlaying,
+      unlocked: this.unlocked,
+      ctx: this.ctx?.state ?? null,
+      buffers: this.ostBuffers.length,
+      ostIdx: this.ostIdx,
+      hasSource: !!this.ostSource,
+      html: this.trackEls.map((a) => ({
+        src: a.src.split("/").pop(),
+        paused: a.paused,
+        t: Math.round(a.currentTime * 10) / 10,
+        vol: a.volume,
+        err: a.error?.message ?? a.error?.code ?? null,
+        rs: a.readyState,
+      })),
+      mute: this.mute,
+      musicVol: this.musicVol,
+      masterVol: this.masterVol,
+    };
   }
 
   dispose() {
     this.stopMusic();
+    for (const a of this.trackEls) {
+      try {
+        a.remove();
+      } catch {
+        /* */
+      }
+    }
     this.trackEls = [];
+    for (const u of this.ostBlobUrls) {
+      try {
+        URL.revokeObjectURL(u);
+      } catch {
+        /* */
+      }
+    }
+    this.ostBlobUrls = [];
+    this.ostBuffers = [];
+    this.ostLoading = null;
     try {
       this.engineOsc?.stop();
     } catch {

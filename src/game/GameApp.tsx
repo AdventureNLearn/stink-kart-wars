@@ -40,6 +40,8 @@ export function GameApp() {
   const [activeBtns, setActiveBtns] = useState<Record<string, boolean>>({});
   const [settings, setSettings] = useState<GameSettings>(() => loadSettings());
   const [menuTab, setMenuTab] = useState<MenuTab>("play");
+  /** Pause overlay tab: main / settings / controls */
+  const [pauseTab, setPauseTab] = useState<"main" | "settings" | "controls">("main");
   const [listening, setListening] = useState<ControlAction | null>(null);
 
   useEffect(() => {
@@ -69,6 +71,10 @@ export function GameApp() {
     engineRef.current?.setMinimapCanvas(minimapRef.current);
   }, [ready, hud?.phase]);
 
+  useEffect(() => {
+    if (hud?.phase === "paused") setPauseTab("main");
+  }, [hud?.phase]);
+
   const persist = useCallback((next: GameSettings) => {
     setSettings(next);
     saveSettings(next);
@@ -96,9 +102,10 @@ export function GameApp() {
   }, [listening, settings, persist]);
 
   const startGame = useCallback(() => {
+    // Unlock + start OST in the same user gesture (autoplay policy)
     gameAudio.unlock();
+    gameAudio.startMusic(1);
     engineRef.current?.startGame();
-    // ensure keyboard focus for embedded preview
     canvasRef.current?.focus();
   }, []);
 
@@ -652,22 +659,220 @@ export function GameApp() {
         )}
 
         {phase === "paused" && (
-          <div className="finish-screen interactive">
+          <div className="finish-screen interactive pause-screen">
             <h2>PAUSED</h2>
-            <button
-              type="button"
-              className="start-btn"
-              onClick={() => engineRef.current?.resume()}
-            >
-              Resume
-            </button>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => engineRef.current?.returnToTitle()}
-            >
-              Quit to Title
-            </button>
+            <div className="menu-tabs pause-tabs">
+              {(
+                [
+                  ["main", "Resume"],
+                  ["settings", "Settings"],
+                  ["controls", "Controls"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`menu-tab ${pauseTab === id ? "active" : ""}`}
+                  onClick={() => {
+                    setPauseTab(id);
+                    gameAudio.unlock();
+                    gameAudio.playUiClick();
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {pauseTab === "main" && (
+              <div className="menu-panel">
+                <button
+                  type="button"
+                  className="start-btn"
+                  onClick={() => {
+                    gameAudio.unlock();
+                    // Keep OST going if it stalled
+                    if (!gameAudio.isMusicPlaying()) gameAudio.startMusic(1);
+                    engineRef.current?.resume();
+                  }}
+                >
+                  Resume Mission
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setPauseTab("settings");
+                    gameAudio.playUiClick();
+                  }}
+                >
+                  Settings & Audio
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setPauseTab("controls");
+                    gameAudio.playUiClick();
+                  }}
+                >
+                  Edit Controls
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => engineRef.current?.returnToTitle()}
+                >
+                  Quit to Title
+                </button>
+              </div>
+            )}
+
+            {pauseTab === "settings" && (
+              <div className="menu-panel settings-panel pause-panel">
+                <label className="setting-row">
+                  <span>Master</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.masterVol}
+                    onChange={(e) =>
+                      persist({
+                        ...settings,
+                        masterVol: Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="setting-row">
+                  <span>SFX</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.sfxVol}
+                    onChange={(e) =>
+                      persist({ ...settings, sfxVol: Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <label className="setting-row">
+                  <span>Music</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.musicVol}
+                    onChange={(e) => {
+                      const musicVol = Number(e.target.value);
+                      persist({ ...settings, musicVol });
+                      // Nudge OST if user raises music from silence
+                      if (musicVol > 0.02 && !settings.mute) {
+                        gameAudio.unlock();
+                        if (!gameAudio.isMusicPlaying()) gameAudio.startMusic(1);
+                      }
+                    }}
+                  />
+                </label>
+                <label className="setting-row check">
+                  <span>Mute</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.mute}
+                    onChange={(e) =>
+                      persist({ ...settings, mute: e.target.checked })
+                    }
+                  />
+                </label>
+                <label className="setting-row check">
+                  <span>Camera Shake</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.cameraShake}
+                    onChange={(e) =>
+                      persist({ ...settings, cameraShake: e.target.checked })
+                    }
+                  />
+                </label>
+                <label className="setting-row check">
+                  <span>Auto-Roll (optional)</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.autoAccel}
+                    onChange={(e) =>
+                      persist({ ...settings, autoAccel: e.target.checked })
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    gameAudio.unlock();
+                    gameAudio.restartMusic();
+                    gameAudio.playUiClick();
+                  }}
+                >
+                  Restart Music
+                </button>
+                <button
+                  type="button"
+                  className="start-btn"
+                  onClick={() => engineRef.current?.resume()}
+                >
+                  Back to Game
+                </button>
+              </div>
+            )}
+
+            {pauseTab === "controls" && (
+              <div className="menu-panel controls-panel pause-panel">
+                <p className="panel-label">Click a row, then press a key</p>
+                <div className="bind-list">
+                  {BIND_ACTIONS.map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      className={`bind-row ${listening === action ? "listening" : ""}`}
+                      onClick={() => {
+                        gameAudio.unlock();
+                        setListening(action);
+                      }}
+                    >
+                      <span>{ACTION_LABELS[action]}</span>
+                      <kbd>
+                        {listening === action
+                          ? "…"
+                          : codeLabel(settings.bindings[action])}
+                      </kbd>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() =>
+                    persist({
+                      ...settings,
+                      bindings: { ...DEFAULT_BINDINGS },
+                    })
+                  }
+                >
+                  Reset Defaults
+                </button>
+                <button
+                  type="button"
+                  className="start-btn"
+                  onClick={() => engineRef.current?.resume()}
+                >
+                  Back to Game
+                </button>
+              </div>
+            )}
           </div>
         )}
 

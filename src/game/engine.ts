@@ -628,7 +628,12 @@ export class KartEngine {
     if (this.phase === "playing") this.phase = "paused";
   }
   resume() {
-    if (this.phase === "paused") this.phase = "playing";
+    if (this.phase === "paused") {
+      this.phase = "playing";
+      // Auto-resume OST if browser suspended it
+      gameAudio.unlock();
+      if (!gameAudio.isMusicPlaying()) gameAudio.startMusic(1);
+    }
   }
 
   advanceDialogue() {
@@ -2046,6 +2051,9 @@ export class KartEngine {
       selectWeapon: (slot: number) => this.selectWeapon(slot),
       cycleWeapon: (dir: 1 | -1 = 1) => this.cycleWeapon(dir),
       getWeapon: () => this.player.weaponSlot,
+      isMusicPlaying: () => gameAudio.isMusicPlaying(),
+      startMusic: () => gameAudio.startMusic(1),
+      getMusicDebug: () => gameAudio.debugMusic(),
     };
   }
 }
@@ -2089,6 +2097,9 @@ declare global {
       selectWeapon?: (slot: number) => void;
       cycleWeapon?: (dir?: 1 | -1) => void;
       getWeapon?: () => number;
+      isMusicPlaying?: () => boolean;
+      startMusic?: () => void;
+      getMusicDebug?: () => Record<string, unknown>;
     };
   }
 }

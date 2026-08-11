@@ -1052,3 +1052,35 @@
 @media (max-width: 720px) {
   .weapon-slot .ws-name { font-size: 0.45rem; }
 }
+
+
+/* Pause overlay with settings / controls */
+.pause-screen {
+  justify-content: flex-start;
+  padding-top: 8vh;
+  overflow-y: auto;
+  background: #05080cf2;
+}
+.pause-screen h2 {
+  margin-bottom: 0.6rem;
+}
+.pause-tabs {
+  margin-bottom: 0.75rem;
+}
+.pause-panel {
+  width: min(420px, 92vw);
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  text-align: left;
+}
+.pause-panel .start-btn,
+.pause-panel .ghost-btn {
+  width: 100%;
+  margin-top: 0.45rem;
+}
+.pause-screen .menu-panel .start-btn,
+.pause-screen .menu-panel .ghost-btn {
+  width: min(320px, 88vw);
+  display: block;
+  margin: 0.4rem auto;
+}
