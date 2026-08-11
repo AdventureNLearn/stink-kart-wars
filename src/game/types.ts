@@ -10,6 +10,8 @@ export interface InputState {
   useItem: boolean;
   skill: boolean;
   stinkCloud: boolean;
+  /** True when this fire edge is secondary (double-tap). */
+  secondaryFire?: boolean;
   sprint: boolean;
   lookBack: boolean;
   pause?: boolean;

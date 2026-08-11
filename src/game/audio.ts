@@ -70,12 +70,8 @@ export class GameAudio {
       const m = this.mute ? 0 : this.masterVol * this.masterVol;
       this.master.gain.setTargetAtTime(m, t, 0.02);
       this.sfx.gain.setTargetAtTime(this.sfxVol * this.sfxVol, t, 0.02);
-      // Linear music gain so OST is clearly audible
-      this.music.gain.setTargetAtTime(
-        this.mute ? 0 : this.musicVol * 0.85,
-        t,
-        0.02,
-      );
+      // Music bus stays near-unity; track volume = master * musicVol
+      this.music.gain.setTargetAtTime(this.mute ? 0 : 1, t, 0.02);
     }
     this.applyTrackVolumes();
   }
@@ -342,23 +338,59 @@ export class GameAudio {
   }
 
   private applyTrackVolumes() {
-    const vol = this.mute ? 0 : Math.max(0, Math.min(1, this.masterVol * this.musicVol));
-    for (const a of this.trackEls) a.volume = vol;
+    const vol = this.mute
+      ? 0
+      : Math.max(0, Math.min(1, this.masterVol * this.musicVol));
+    for (const a of this.trackEls) {
+      a.volume = vol;
+    }
   }
 
   private ostBlobUrls: string[] = [];
+  private mediaWired = false;
+
+  /** Brighten OST through a light presence shelf (keeps MP3 decode pristine). */
+  private wireMediaGraph(el: HTMLAudioElement) {
+    if (!this.ctx || !this.music) return;
+    try {
+      // One MediaElementSource per element, once.
+      if ((el as unknown as { __wired?: boolean }).__wired) return;
+      const src = this.ctx.createMediaElementSource(el);
+      const presence = this.ctx.createBiquadFilter();
+      presence.type = "peaking";
+      presence.frequency.value = 3800;
+      presence.Q.value = 0.85;
+      presence.gain.value = 3.5; // presence / crisp mid-highs
+      const air = this.ctx.createBiquadFilter();
+      air.type = "highshelf";
+      air.frequency.value = 6500;
+      air.gain.value = 2.5;
+      const lowcut = this.ctx.createBiquadFilter();
+      lowcut.type = "lowshelf";
+      lowcut.frequency.value = 90;
+      lowcut.gain.value = -2; // tidy muddy sub
+      src.connect(lowcut);
+      lowcut.connect(presence);
+      presence.connect(air);
+      air.connect(this.music);
+      (el as unknown as { __wired?: boolean }).__wired = true;
+      // When routed through WebAudio, element.volume still works as pre-gain
+      el.volume = this.mute
+        ? 0
+        : Math.max(0, Math.min(1, this.masterVol * this.musicVol));
+    } catch (err) {
+      console.warn("[ost] media graph wire failed", err);
+    }
+  }
 
   private async preloadOstAssets(): Promise<void> {
-    if (this.ostBuffers.length === this.ostUrls.length && this.trackEls.length) {
+    if (this.trackEls.length === this.ostUrls.length && this.ostBlobUrls.length) {
       return;
     }
     if (this.ostLoading) return this.ostLoading;
     this.unlock();
-    const ctx = this.ctx!;
     this.ostLoading = (async () => {
-      const buffers: AudioBuffer[] = [];
       const els: HTMLAudioElement[] = [];
-      // Revoke old blobs
       for (const u of this.ostBlobUrls) {
         try {
           URL.revokeObjectURL(u);
@@ -367,40 +399,6 @@ export class GameAudio {
         }
       }
       this.ostBlobUrls = [];
-
-      for (const url of this.ostUrls) {
-        try {
-          const res = await fetch(url, { cache: "force-cache" });
-          if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
-          const raw = await res.arrayBuffer();
-          // WebAudio buffer
-          try {
-            const buf = await ctx.decodeAudioData(raw.slice(0));
-            buffers.push(buf);
-          } catch (err) {
-            console.warn("[ost] decode failed", url, err);
-          }
-          // HTMLAudio from blob (most reliable play() after gesture)
-          const blob = new Blob([raw], { type: "audio/mpeg" });
-          const blobUrl = URL.createObjectURL(blob);
-          this.ostBlobUrls.push(blobUrl);
-          const a = new Audio();
-          a.preload = "auto";
-          a.loop = false;
-          a.src = blobUrl;
-          a.setAttribute("playsinline", "true");
-          // Attach to DOM (some engines require it for autoplay)
-          a.style.display = "none";
-          if (typeof document !== "undefined") {
-            document.body.appendChild(a);
-          }
-          els.push(a);
-        } catch (err) {
-          console.warn("[ost] fetch failed", url, err);
-        }
-      }
-      this.ostBuffers = buffers;
-      // Replace HTML tracks
       for (const old of this.trackEls) {
         try {
           old.pause();
@@ -409,20 +407,53 @@ export class GameAudio {
           /* */
         }
       }
+
+      for (const url of this.ostUrls) {
+        try {
+          const res = await fetch(url, { cache: "force-cache" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const raw = await res.arrayBuffer();
+          const blob = new Blob([raw], { type: "audio/mpeg" });
+          const blobUrl = URL.createObjectURL(blob);
+          this.ostBlobUrls.push(blobUrl);
+          const a = new Audio();
+          a.preload = "auto";
+          a.loop = false;
+          a.crossOrigin = "anonymous";
+          a.src = blobUrl;
+          a.setAttribute("playsinline", "true");
+          a.style.display = "none";
+          document.body.appendChild(a);
+          // Decode fully before play for zero-stutter starts
+          await new Promise<void>((resolve) => {
+            const done = () => resolve();
+            if (a.readyState >= 3) done();
+            else {
+              a.addEventListener("canplaythrough", done, { once: true });
+              a.addEventListener("error", done, { once: true });
+              a.load();
+            }
+          });
+          this.wireMediaGraph(a);
+          els.push(a);
+        } catch (err) {
+          console.warn("[ost] preload failed", url, err);
+        }
+      }
       this.trackEls = els;
+      this.ostBuffers = []; // not used — native HTML decode only
       this.applyTrackVolumes();
     })();
     return this.ostLoading;
   }
 
   private ensureHtmlTracks() {
-    // Synchronous no-op — real load is preloadOstAssets()
     if (!this.trackEls.length) {
-      // Placeholder silent elements until blobs ready
       this.trackEls = this.ostUrls.map((src) => {
         const a = new Audio(src);
         a.preload = "auto";
         a.loop = false;
+        a.crossOrigin = "anonymous";
         return a;
       });
     }
@@ -445,32 +476,9 @@ export class GameAudio {
     }
   }
 
-  private playOstBufferAt(idx: number) {
-    if (!this.musicWanted || !this.ctx || !this.music || !this.ostBuffers.length) return;
-    this.stopOstSource();
-    this.ostIdx =
-      ((idx % this.ostBuffers.length) + this.ostBuffers.length) %
-      this.ostBuffers.length;
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.ostBuffers[this.ostIdx]!;
-    src.connect(this.music);
-    src.onended = () => {
-      if (!this.musicWanted) return;
-      this.playOstBufferAt(this.ostIdx + 1);
-    };
-    try {
-      src.start(0);
-      this.ostSource = src;
-      this.musicPlaying = true;
-    } catch (err) {
-      console.warn("[ost] buffer start failed", err);
-      this.playHtmlTrackAt(this.ostIdx);
-    }
-  }
-
   private playHtmlTrackAt(idx: number) {
     if (!this.musicWanted) return;
-    this.ensureHtmlTracks();
+    if (!this.trackEls.length) this.ensureHtmlTracks();
     if (!this.trackEls.length) return;
     for (let i = 0; i < this.trackEls.length; i++) {
       const el = this.trackEls[i]!;
@@ -484,7 +492,8 @@ export class GameAudio {
       }
     }
     this.trackIdx =
-      ((idx % this.trackEls.length) + this.trackEls.length) % this.trackEls.length;
+      ((idx % this.trackEls.length) + this.trackEls.length) %
+      this.trackEls.length;
     const a = this.trackEls[this.trackIdx]!;
     this.applyTrackVolumes();
     try {
@@ -496,71 +505,46 @@ export class GameAudio {
       if (!this.musicWanted) return;
       this.playHtmlTrackAt(this.trackIdx + 1);
     };
-    const kick = () => {
-      const p = a.play();
-      if (p && typeof p.then === "function") {
-        void p
-          .then(() => {
+    void a
+      .play()
+      .then(() => {
+        this.musicPlaying = true;
+      })
+      .catch((err) => {
+        console.warn("[ost] play blocked", err);
+        window.setTimeout(() => {
+          if (!this.musicWanted) return;
+          void a.play().then(() => {
             this.musicPlaying = true;
-          })
-          .catch((err) => {
-            console.warn("[ost] html play blocked, retry", err);
-            window.setTimeout(() => {
-              if (!this.musicWanted) return;
-              void a.play()
-                .then(() => {
-                  this.musicPlaying = true;
-                })
-                .catch((e2) => console.warn("[ost] html play failed", e2));
-            }, 80);
           });
-      } else {
-        this.musicPlaying = !a.paused;
-      }
-    };
-    // Always try immediately AND on canplay — first track often rs=0 initially
-    kick();
-    if (a.readyState < 3) {
-      a.addEventListener("canplaythrough", kick, { once: true });
-      a.addEventListener("loadeddata", kick, { once: true });
-      try {
-        a.load();
-      } catch {
-        /* */
-      }
-    }
+        }, 60);
+      });
   }
 
   /**
-   * Start OST playlist (autoplay). Call from the Enter/play click gesture.
-   * Fetches MP3s → blob URL HTMLAudio (instant play) + WebAudio buffers.
+   * Crisp OST loop: native MP3 decode via HTMLAudio + light presence EQ.
+   * Call from the Enter click gesture for autoplay.
    */
   startMusic(_seed = 0) {
     this.musicWanted = true;
     this.unlock();
     void this.ctx?.resume();
+    // Linear music bus (no extra squaring — keeps OST full and clear)
+    if (this.music && this.ctx) {
+      this.music.gain.setTargetAtTime(
+        this.mute ? 0 : 1,
+        this.ctx.currentTime,
+        0.02,
+      );
+    }
     this.applyVolumes();
 
-    // Optimistic path: try direct URL while blobs load
+    // Immediate attempt (gesture window), then swap to preloaded crisp blobs
     this.ensureHtmlTracks();
     this.playHtmlTrackAt(0);
 
     void this.preloadOstAssets().then(() => {
       if (!this.musicWanted) return;
-      // Prefer WebAudio buffers when ready (stable loop, no element quirks)
-      if (this.ostBuffers.length > 0) {
-        for (const a of this.trackEls) {
-          a.onended = null;
-          try {
-            a.pause();
-          } catch {
-            /* */
-          }
-        }
-        this.playOstBufferAt(0);
-        return;
-      }
-      // Else HTML blob elements
       if (this.trackEls.length) {
         this.playHtmlTrackAt(0);
       }

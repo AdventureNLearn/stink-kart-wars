@@ -1,4 +1,4 @@
-/** Six selectable weapons for Stinky — keyboard 1–6 / mobile swipe. */
+/** Six selectable weapons — 1–6 select, Q/E fire (single=primary, double=secondary). */
 
 export type WeaponId =
   | "stink_spray"
@@ -10,24 +10,29 @@ export type WeaponId =
 
 export type WeaponDef = {
   id: WeaponId;
-  /** Slot 1–6 */
   slot: number;
   name: string;
   short: string;
-  /** Stink meter cost per shot */
+  /** Primary stink cost */
   cost: number;
-  /** Cooldown seconds */
+  /** Primary cooldown */
   cd: number;
   color: number;
-  /** Projectile kind tag used by engine */
   projectile: "stink" | "ooze" | "rocket" | "mine" | "bolt" | "blade";
   speed: number;
   life: number;
   radius: number;
   damage: number;
   splash: number;
-  /** Melee range for blade */
   melee?: number;
+  /** Secondary fire (double-tap Q/E/FIRE) */
+  secCost: number;
+  secCd: number;
+  secDamageMul: number;
+  secSplashMul: number;
+  secCount: number;
+  secSpread: number;
+  secName: string;
 };
 
 export const WEAPONS: WeaponDef[] = [
@@ -45,6 +50,13 @@ export const WEAPONS: WeaponDef[] = [
     radius: 2.2,
     damage: 22,
     splash: 0,
+    secCost: 22,
+    secCd: 0.55,
+    secDamageMul: 1.15,
+    secSplashMul: 1,
+    secCount: 5,
+    secSpread: 0.28,
+    secName: "Spray Fan",
   },
   {
     id: "ooze_blob",
@@ -60,6 +72,13 @@ export const WEAPONS: WeaponDef[] = [
     radius: 3.2,
     damage: 48,
     splash: 5,
+    secCost: 36,
+    secCd: 1.2,
+    secDamageMul: 1.45,
+    secSplashMul: 1.6,
+    secCount: 1,
+    secSpread: 0,
+    secName: "Ooze Bomb",
   },
   {
     id: "slime_rocket",
@@ -75,6 +94,13 @@ export const WEAPONS: WeaponDef[] = [
     radius: 1.8,
     damage: 70,
     splash: 8,
+    secCost: 42,
+    secCd: 1.5,
+    secDamageMul: 1.1,
+    secSplashMul: 1.2,
+    secCount: 3,
+    secSpread: 0.18,
+    secName: "Rocket Salvo",
   },
   {
     id: "gas_mine",
@@ -90,6 +116,13 @@ export const WEAPONS: WeaponDef[] = [
     radius: 3.5,
     damage: 55,
     splash: 7,
+    secCost: 30,
+    secCd: 1.8,
+    secDamageMul: 1.05,
+    secSplashMul: 1.3,
+    secCount: 3,
+    secSpread: 0,
+    secName: "Mine Cluster",
   },
   {
     id: "quantum_bolt",
@@ -105,6 +138,13 @@ export const WEAPONS: WeaponDef[] = [
     radius: 1.2,
     damage: 40,
     splash: 2,
+    secCost: 28,
+    secCd: 0.7,
+    secDamageMul: 1.35,
+    secSplashMul: 1.5,
+    secCount: 3,
+    secSpread: 0.12,
+    secName: "Bolt Storm",
   },
   {
     id: "bandana_blade",
@@ -121,6 +161,13 @@ export const WEAPONS: WeaponDef[] = [
     damage: 65,
     splash: 4.5,
     melee: 5.5,
+    secCost: 24,
+    secCd: 0.85,
+    secDamageMul: 1.55,
+    secSplashMul: 1.4,
+    secCount: 1,
+    secSpread: 0,
+    secName: "Blade Whirl",
   },
 ];
 

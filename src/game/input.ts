@@ -31,6 +31,10 @@ export class GameInput {
   private edgeSkill = false;
   private edgeStink = false;
   private edgePause = false;
+  /** Double-click window on primary key/FIRE → secondary (ms). */
+  private static readonly DOUBLE_MS = 350;
+  private pendingPrimary = false;
+  private primaryReadyAt = 0;
   private prev = {
     hop: false,
     item: false,
@@ -85,6 +89,9 @@ export class GameInput {
           "Digit4",
           "Digit5",
           "Digit6",
+          "KeyQ",
+          "KeyE",
+          "KeyX",
         ].includes(e.code)
       ) {
         e.preventDefault();
@@ -114,16 +121,8 @@ export class GameInput {
   sample(): InputState {
     // HARD fallbacks: WASD + arrows always work even if rebinds break
     let steer = 0;
-    if (
-      this.pressed("steerLeft") ||
-      this.any("KeyA", "ArrowLeft")
-    )
-      steer += 1;
-    if (
-      this.pressed("steerRight") ||
-      this.any("KeyD", "ArrowRight")
-    )
-      steer -= 1;
+    if (this.pressed("steerLeft") || this.any("KeyA", "ArrowLeft")) steer += 1;
+    if (this.pressed("steerRight") || this.any("KeyD", "ArrowRight")) steer -= 1;
     steer += this.touchSteer;
     steer = Math.max(-1, Math.min(1, steer));
 
@@ -135,12 +134,15 @@ export class GameInput {
     // buttons never clobber held acceleration.
     if (this.touchGas) throttle = Math.max(throttle, 1);
     if (this.touchBrake) throttle = Math.min(throttle, -1);
-    if (!this.touchGas && !this.touchBrake && Math.abs(this.touchThrottle) > 0.05) {
+    if (
+      !this.touchGas &&
+      !this.touchBrake &&
+      Math.abs(this.touchThrottle) > 0.05
+    ) {
       throttle = this.touchThrottle;
     }
 
     // Soft auto-roll only if no reverse intent and not already reversing hard.
-    // Never fight brake/reverse with autoAccel.
     if (
       throttle === 0 &&
       this.autoAccel &&
@@ -160,12 +162,19 @@ export class GameInput {
       this.pressed("drift") ||
       this.any("ShiftLeft", "ShiftRight") ||
       this.touchDrift;
-    const itemHeld =
-      this.pressed("useItem") || this.any("KeyX", "KeyF") || this.touchItem;
-    const skillHeld =
+
+    // Weapon operate:
+    //   1–6 = select only
+    //   Q / FIRE single-click = PRIMARY (deferred so double-click can upgrade)
+    //   Q / FIRE double-click OR E / SEC = SECONDARY of selected weapon
+    const primaryHeld =
+      this.pressed("useItem") ||
+      this.pressed("stink") ||
+      this.any("KeyQ", "KeyX", "KeyF") ||
+      this.touchItem ||
+      this.touchStink;
+    const secondaryHeld =
       this.pressed("skill") || this.any("KeyE") || this.touchSkill;
-    const stinkHeld =
-      this.pressed("stink") || this.any("KeyQ", "KeyZ") || this.touchStink;
     const sprintHeld =
       this.pressed("sprint") ||
       this.any("KeyR", "ControlLeft") ||
@@ -173,15 +182,48 @@ export class GameInput {
     const pauseHeld = this.pressed("pause") || this.any("Escape", "KeyP");
 
     this.edgeHop = hopHeld && !this.prev.hop;
-    this.edgeItem = itemHeld && !this.prev.item;
-    this.edgeSkill = skillHeld && !this.prev.skill;
-    this.edgeStink = stinkHeld && !this.prev.stink;
     this.edgePause = pauseHeld && !this.prev.pause;
+
+    const now = performance.now();
+    let primaryEdge = false;
+    let secondaryFire = false;
+
+    const primaryDown = primaryHeld && !this.prev.stink;
+    const secondaryDown = secondaryHeld && !this.prev.skill;
+
+    if (secondaryDown) {
+      // E / SEC — secondary immediately; cancel any pending primary
+      this.pendingPrimary = false;
+      secondaryFire = true;
+    } else if (primaryDown) {
+      if (this.pendingPrimary) {
+        // Second click while primary is armed → secondary
+        this.pendingPrimary = false;
+        secondaryFire = true;
+      } else if (this.touchItem || this.touchStink) {
+        // Touch FIRE is instant primary (SEC button handles secondary)
+        primaryEdge = true;
+      } else {
+        // Keyboard Q/X — defer so double-click can upgrade to secondary
+        this.pendingPrimary = true;
+        this.primaryReadyAt = now + GameInput.DOUBLE_MS;
+      }
+    }
+
+    if (this.pendingPrimary && now >= this.primaryReadyAt) {
+      this.pendingPrimary = false;
+      primaryEdge = true;
+    }
+
+    this.edgeItem = primaryEdge || secondaryFire;
+    this.edgeSkill = secondaryFire;
+    this.edgeStink = primaryEdge;
+
     this.prev = {
       hop: hopHeld,
-      item: itemHeld,
-      skill: skillHeld,
-      stink: stinkHeld,
+      item: primaryHeld || secondaryHeld,
+      skill: secondaryHeld,
+      stink: primaryHeld,
       pause: pauseHeld,
     };
 
@@ -197,14 +239,15 @@ export class GameInput {
       useItem: this.edgeItem,
       skill: this.edgeSkill,
       stinkCloud: this.edgeStink,
+      secondaryFire,
       sprint: sprintHeld,
       lookBack: this.pressed("lookBack") || this.any("KeyB"),
       pause: this.edgePause,
       autoAccel: this.autoAccel,
       weaponSelect,
       interact:
-        this.edgeItem ||
-        this.edgeSkill ||
+        primaryEdge ||
+        secondaryFire ||
         this.edgeHop ||
         this.any("Enter", "Space"),
     };

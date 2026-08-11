@@ -1115,12 +1115,10 @@ export class KartEngine {
       }
     }
 
-    // Weapon fire — X / touch FIRE / useItem. Q/E still fire spray/ooze shortcuts.
-    if (input.useItem || input.stinkCloud || input.skill) {
-      let slot = p.weaponSlot;
-      if (input.stinkCloud && !input.useItem) slot = 1;
-      if (input.skill && !input.useItem && !input.stinkCloud) slot = 2;
-      this.tryFireWeapon(slot);
+    // Weapon fire — 1–6 select · Q/E/FIRE operate selected weapon
+    // single tap = primary · double-tap or E = secondary
+    if (input.useItem || input.stinkCloud || input.skill || input.secondaryFire) {
+      this.tryFireWeapon(p.weaponSlot, !!(input.secondaryFire || input.skill));
     }
 
     for (const o of this.world.objects) {
@@ -1185,110 +1183,137 @@ export class KartEngine {
     this.selectWeapon(next);
   }
 
-  private tryFireWeapon(slot: number) {
+  private tryFireWeapon(slot: number, secondary = false) {
     const p = this.player;
     const w = weaponBySlot(slot);
+    const cost = secondary ? w.secCost : w.cost;
+    const cd = secondary ? w.secCd : w.cd;
     if (p.weaponCd > 0.02) return;
-    if (p.stink < w.cost) {
+    if (p.stink < cost) {
       this.announce = "LOW STINK";
       this.announceTimer = 0.55;
       return;
     }
     p.weaponSlot = w.slot;
-    p.weaponCd = w.cd;
-    p.stink -= w.cost;
-    this.fireWeapon(w);
+    p.weaponCd = cd;
+    p.stink -= cost;
+    if (secondary) {
+      this.announce = w.secName;
+      this.announceTimer = 0.55;
+    }
+    this.fireWeapon(w, secondary);
   }
 
-  private fireWeapon(w: WeaponDef) {
+  private fireWeapon(w: WeaponDef, secondary = false) {
     const p = this.player;
-    const fx = -Math.sin(p.yaw);
-    const fz = -Math.cos(p.yaw);
+    const baseYaw = p.yaw;
+    const dmgMul = secondary ? w.secDamageMul : 1;
+    const splashMul = secondary ? w.secSplashMul : 1;
+    const count = secondary ? Math.max(1, w.secCount) : 1;
+    const spread = secondary ? w.secSpread : 0;
+    const damage = (w.damage + p.level * 3) * dmgMul;
+    const splash = w.splash * splashMul;
+    const radius = w.radius * (secondary ? 1.15 : 1);
+    const melee = (w.melee ?? 5.5) * (secondary ? 1.35 : 1);
 
     if (w.projectile === "blade") {
       gameAudio.playFart("big");
-      this.trauma = Math.min(1, this.trauma + 0.25);
-      this.particles.emit(p.x + fx * 2, p.y + 1.2, p.z + fz * 2, 16, {
+      this.trauma = Math.min(1, this.trauma + (secondary ? 0.4 : 0.25));
+      const fx = -Math.sin(baseYaw);
+      const fz = -Math.cos(baseYaw);
+      this.particles.emit(p.x + fx * 2, p.y + 1.2, p.z + fz * 2, secondary ? 28 : 16, {
         color: w.color,
-        speed: 8,
-        life: 0.35,
+        speed: secondary ? 12 : 8,
+        life: 0.4,
         vy: 2,
       });
       for (const e of this.enemies) {
         if (!e.alive) continue;
-        if (Math.hypot(e.x - p.x, e.z - p.z) < (w.melee ?? 5.5)) {
-          this.damageEnemy(e, w.damage + p.level * 3);
+        if (Math.hypot(e.x - p.x, e.z - p.z) < melee) {
+          this.damageEnemy(e, damage);
         }
       }
       return;
     }
 
     if (w.projectile === "mine") {
-      const mesh = createStinkCloudMesh();
-      mesh.scale.setScalar(0.7);
-      const x = p.x - fx * 2.5;
-      const z = p.z - fz * 2.5;
-      const y = this.world.groundY(x, z) + 0.6;
+      for (let i = 0; i < count; i++) {
+        const ang = baseYaw + (i - (count - 1) / 2) * 0.55;
+        const fx = -Math.sin(ang);
+        const fz = -Math.cos(ang);
+        const mesh = createStinkCloudMesh();
+        mesh.scale.setScalar(secondary ? 0.9 : 0.7);
+        const x = p.x - fx * (2.5 + i * 0.8);
+        const z = p.z - fz * (2.5 + i * 0.8);
+        const y = this.world.groundY(x, z) + 0.6;
+        mesh.position.set(x, y, z);
+        this.scene.add(mesh);
+        this.projectiles.push({
+          mesh,
+          x,
+          y,
+          z,
+          vx: 0,
+          vy: 0,
+          vz: 0,
+          life: w.life,
+          kind: "mine",
+          owner: "player",
+          radius,
+          damage,
+          splash,
+        });
+      }
+      gameAudio.playStinkBomb();
+      return;
+    }
+
+    for (let i = 0; i < count; i++) {
+      const offset = count === 1 ? 0 : (i - (count - 1) / 2) * spread;
+      const yaw = baseYaw + offset;
+      const fx = -Math.sin(yaw);
+      const fz = -Math.cos(yaw);
+      let mesh: THREE.Group;
+      if (w.projectile === "ooze") mesh = createOozeWaveMesh();
+      else if (w.projectile === "rocket") mesh = createShellMesh("rocket");
+      else if (w.projectile === "bolt") mesh = createShellMesh("shell");
+      else mesh = createStinkCloudMesh();
+
+      const speed = w.speed + Math.abs(p.speed) * 0.4;
+      const x = p.x + fx * 3.2;
+      const z = p.z + fz * 3.2;
+      const y = p.y + 1.1;
       mesh.position.set(x, y, z);
       this.scene.add(mesh);
+      const kind =
+        w.projectile === "rocket"
+          ? "rocket"
+          : w.projectile === "bolt"
+            ? "bolt"
+            : w.projectile === "ooze"
+              ? "ooze"
+              : "stink";
       this.projectiles.push({
         mesh,
         x,
         y,
         z,
-        vx: 0,
-        vy: 0,
-        vz: 0,
-        life: w.life,
-        kind: "mine",
+        vx: fx * speed,
+        vy: w.projectile === "rocket" ? 2.5 + (secondary ? 1 : 0) : 0,
+        vz: fz * speed,
+        life: w.life * (secondary ? 1.1 : 1),
+        kind,
         owner: "player",
-        radius: w.radius,
-        damage: w.damage + p.level * 3,
-        splash: w.splash,
+        radius,
+        damage,
+        splash,
       });
-      gameAudio.playStinkBomb();
-      return;
+      if (w.projectile === "stink") {
+        this.particles.stinkPuff(x, y, z);
+      }
     }
-
-    let mesh: THREE.Group;
-    if (w.projectile === "ooze") mesh = createOozeWaveMesh();
-    else if (w.projectile === "rocket") mesh = createShellMesh("rocket");
-    else if (w.projectile === "bolt") mesh = createShellMesh("shell");
-    else mesh = createStinkCloudMesh();
-
-    const speed = w.speed + Math.abs(p.speed) * 0.4;
-    const x = p.x + fx * 3.2;
-    const z = p.z + fz * 3.2;
-    const y = p.y + 1.1;
-    mesh.position.set(x, y, z);
-    this.scene.add(mesh);
-    const kind =
-      w.projectile === "rocket"
-        ? "rocket"
-        : w.projectile === "bolt"
-          ? "bolt"
-          : w.projectile === "ooze"
-            ? "ooze"
-            : "stink";
-    this.projectiles.push({
-      mesh,
-      x,
-      y,
-      z,
-      vx: fx * speed,
-      vy: w.projectile === "rocket" ? 2.5 : 0,
-      vz: fz * speed,
-      life: w.life,
-      kind,
-      owner: "player",
-      radius: w.radius,
-      damage: w.damage + p.level * 3,
-      splash: w.splash,
-    });
-    if (w.projectile === "stink") {
-      gameAudio.playStinkBomb();
-      this.particles.stinkPuff(x, y, z);
-    } else if (w.projectile === "ooze") {
+    if (w.projectile === "stink") gameAudio.playStinkBomb();
+    else if (w.projectile === "ooze") {
       gameAudio.playFart("big");
       gameAudio.playBoost();
       this.trauma = Math.min(1, this.trauma + 0.35);

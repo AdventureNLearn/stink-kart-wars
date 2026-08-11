@@ -70,7 +70,7 @@ Platform revive helper: `startup.sh` probes `:8080` then starts `npm run dev` if
 6. **Cameras:** CHASE / NEAR / HIGH / NOSE + zoom; labels match HUD.
 7. **Castles grounded:** `FORT_PADS` + `addCastleFoundation` + `terrainHeight`.
 8. **Wrecks ≠ enemies:** `createWreckTankMesh()` husks with soot; live tanks use `createTankMesh`.
-9. **Weapons:** 1 Spray · 2 Ooze · 3 Rocket · 4 Mine · 5 Q-Bolt · 6 Blade; fire with X / FIRE.
+9. **Weapons:** 1–6 select only · **Q** primary · **E** secondary (or double-tap Q / SEC) · mobile FIRE/SEC.
 10. **Safe zones:** `SAFE_ZONES` in openWorld; regen multiplier in engine.
 11. **HUD:** nothing covers play-critical chrome. Dialogue mid-screen; bottom chrome **hidden** while dialogue open. Boss bar only when near Reek or he is damaged.
 12. **Lighting:** controlled weak PMREM; avoid global haze / excess env intensity.
@@ -79,16 +79,23 @@ Platform revive helper: `startup.sh` probes `:8080` then starts `npm run dev` if
 
 ## 5. Weapons (reference)
 
-| Slot | Id | Notes |
-|------|-----|--------|
-| 1 | stink_spray | Cheap rapid |
-| 2 | ooze_blob | Splash |
-| 3 | slime_rocket | Arcing rocket |
-| 4 | gas_mine | Drop behind |
-| 5 | quantum_bolt | Fast hitscan-ish |
-| 6 | bandana_blade | Melee AOE |
+| Input | Action |
+|-------|--------|
+| **1–6** | Select weapon (no fire) |
+| **Q** (single) | Primary fire of selected |
+| **Q** double-tap / **E** | Secondary fire of selected |
+| Mobile **FIRE** / **SEC** | Primary / secondary |
 
-Ammo = **STINK** meter. Cooldowns per weapon in `weapons.ts`.
+| Slot | Id | Secondary |
+|------|-----|-----------|
+| 1 | stink_spray | Spray Fan (5-way) |
+| 2 | ooze_blob | Ooze Bomb |
+| 3 | slime_rocket | Rocket Salvo (3) |
+| 4 | gas_mine | Mine Cluster |
+| 5 | quantum_bolt | Bolt Storm |
+| 6 | bandana_blade | Blade Whirl |
+
+Ammo = **STINK** meter. Defs in `weapons.ts`.
 
 ---
 

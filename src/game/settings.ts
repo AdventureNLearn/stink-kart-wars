@@ -38,7 +38,7 @@ export const DEFAULT_BINDINGS: ControlBindings = {
   steerRight: "KeyD",
   hop: "Space",
   drift: "ShiftLeft",
-  useItem: "KeyX",
+  useItem: "KeyQ",
   skill: "KeyE",
   stink: "KeyQ",
   sprint: "KeyR",
@@ -53,9 +53,9 @@ export const ACTION_LABELS: Record<ControlAction, string> = {
   steerRight: "Steer Right",
   hop: "Jump / Stomp",
   drift: "Drift (hold)",
-  useItem: "Use Item",
-  skill: "Ooze Overdrive",
-  stink: "Stink Cloud",
+  useItem: "Primary Fire (Q)",
+  skill: "Secondary Fire (E)",
+  stink: "Primary Fire (alt)",
   sprint: "Quantum Sprint",
   lookBack: "Look Back",
   pause: "Pause / Menu",
@@ -64,7 +64,7 @@ export const ACTION_LABELS: Record<ControlAction, string> = {
 export const DEFAULT_SETTINGS: GameSettings = {
   masterVol: 0.8,
   sfxVol: 0.9,
-  musicVol: 0.45,
+  musicVol: 0.72,
   mute: false,
   detail: "high",
   cameraShake: true,
@@ -74,7 +74,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   worldId: "wastes",
 };
 
-const STORAGE_KEY = "stinky-kart-settings-v1";
+const STORAGE_KEY = "stinky-kart-settings-v2";
 
 export function loadSettings(): GameSettings {
   try {

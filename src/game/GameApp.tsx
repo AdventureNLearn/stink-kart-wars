@@ -35,6 +35,7 @@ export function GameApp() {
   const minimapRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<KartEngine | null>(null);
   const stickRef = useRef<HTMLDivElement>(null);
+  const lastFireTapRef = useRef(0);
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [ready, setReady] = useState(false);
   const [activeBtns, setActiveBtns] = useState<Record<string, boolean>>({});
@@ -451,10 +452,7 @@ export function GameApp() {
               </a>
             </p>
             <p className="start-sub">
-              Full-scale ZeroVerse warfare. Six weapons (keys 1–6 / swipe). Hold gas to
-              drive — karts stay still until you throttle. Safe zones regen fast. Jump +
-              stomp raiders. X fire · R sprint · Space hop.
-            </p>
+              Full-scale ZeroVerse warfare. 1–6 select · Q primary · E secondary (double-tap FIRE). Gas/brake · Space jump · R sprint.       </p>
 
             <div className="menu-tabs">
               {(
@@ -500,7 +498,7 @@ export function GameApp() {
                   </div>
                   <div className="feature-card">
                     <strong>Controls</strong>
-                    <span>WASD drive · 1–6 weapons · X fire · R sprint</span>
+                    <span>WASD · 1–6 select · Q primary · E secondary</span>
                   </div>
                 </div>
                 <p className="start-sub" style={{ marginTop: "0.25rem" }}>
@@ -918,6 +916,13 @@ export function GameApp() {
               {...bindHold("item")}
             >
               FIRE
+            </button>
+            <button
+              type="button"
+              className={`touch-btn fire-btn sec-btn ${activeBtns.skill ? "active" : ""}`}
+              {...bindHold("skill")}
+            >
+              SEC
             </button>
             <button
               type="button"

@@ -1084,3 +1084,15 @@
   display: block;
   margin: 0.4rem auto;
 }
+
+.touch-btn.sec-btn {
+  background: linear-gradient(180deg, #3a2a18, #1a1410);
+  border-color: #c4a03599;
+  color: #ffe2a0;
+  font-weight: 900;
+  min-width: 56px;
+}
+.touch-btn.sec-btn.active {
+  background: #c4a035;
+  color: #1a1008;
+}
