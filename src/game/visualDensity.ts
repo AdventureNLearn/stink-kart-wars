@@ -67,7 +67,7 @@ export function paintBody(
     clearcoatRoughness: 0.28,
     emissive: opts.emissive ?? 0x000000,
     emissiveIntensity: opts.emissiveIntensity ?? 0,
-    envMapIntensity: 0.85,
+    envMapIntensity: 0.55,
   });
 }
 
@@ -81,7 +81,7 @@ export function metalPlate(
     metalness: 0.78,
     clearcoat: 0.15,
     clearcoatRoughness: 0.5,
-    envMapIntensity: 1.0,
+    envMapIntensity: 0.65,
   });
 }
 
@@ -115,7 +115,7 @@ export function slimeSkin(
     opacity: opts.opacity ?? 0.94,
     emissive: opts.emissive ?? 0x0a2810,
     emissiveIntensity: opts.emissiveIntensity ?? 0.18,
-    envMapIntensity: 0.7,
+    envMapIntensity: 0.5,
   });
 }
 
@@ -141,7 +141,7 @@ export function eyeCornea(): THREE.MeshPhysicalMaterial {
     thickness: 0.2,
     transparent: true,
     opacity: 0.55,
-    envMapIntensity: 1.2,
+    envMapIntensity: 0.75,
   });
 }
 

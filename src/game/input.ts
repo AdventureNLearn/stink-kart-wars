@@ -122,11 +122,14 @@ export class GameInput {
       throttle = this.touchThrottle;
     }
 
-    // Soft auto-roll only if no reverse and setting on
+    // Soft auto-roll only if no reverse intent and not already reversing hard.
+    // Never fight brake/reverse with autoAccel.
     if (
       throttle === 0 &&
       this.autoAccel &&
       !this.touchBrake &&
+      !this.pressed("brake") &&
+      !this.any("KeyS", "ArrowDown") &&
       Math.abs(this.touchThrottle) < 0.05
     ) {
       throttle = 0.35;
@@ -169,6 +172,7 @@ export class GameInput {
       throttle,
       steer,
       hop: this.edgeHop,
+      hopHeld,
       drift: driftHeld,
       useItem: this.edgeItem,
       skill: this.edgeSkill,

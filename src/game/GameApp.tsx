@@ -101,6 +101,22 @@ export function GameApp() {
     canvasRef.current?.focus();
   }, []);
 
+  // C cycle cam · [ ] zoom (desktop)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (engineRef.current?.phase !== "playing") return;
+      if (e.code === "KeyC" && !e.repeat) {
+        engineRef.current.cycleCamMode(e.shiftKey ? -1 : 1);
+      } else if (e.code === "BracketLeft") {
+        engineRef.current?.adjustCamZoom(-0.08);
+      } else if (e.code === "BracketRight") {
+        engineRef.current?.adjustCamZoom(0.08);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const onStick = useCallback((e: React.PointerEvent) => {
     const el = stickRef.current;
     const engine = engineRef.current;
@@ -319,8 +335,17 @@ export function GameApp() {
                 <canvas ref={minimapRef} width={120} height={120} />
               </div>
               <div className="hud-pill speedo">
-                <p className="num">{Math.round(hud.speed * 2.8)}</p>
+                <p className="num">
+                  {Math.round(Math.abs(hud.speed) * 2.8)}
+                  {hud.speed < -0.5 ? " R" : ""}
+                </p>
                 <p className="unit">KM/H · {hud.kills} kills</p>
+              </div>
+              <div className="cam-hud-pill">
+                <span className="cam-mode-label">{hud.camMode}</span>
+                <span className="cam-zoom-label">
+                  {Math.round(hud.camZoom * 100)}%
+                </span>
               </div>
               <div className="skill-hints">
                 <span>
@@ -629,6 +654,7 @@ export function GameApp() {
 
       {showTouch && (
         <div className="touch-controls">
+          {/* Left: steer stick only */}
           <div
             ref={stickRef}
             className="zone stick-base"
@@ -636,29 +662,8 @@ export function GameApp() {
           >
             <div className="stick-knob" />
           </div>
-          <div className="zone accel-row">
-            <button
-              type="button"
-              className={`touch-btn ${activeBtns.brake ? "active" : ""}`}
-              {...bindHold("brake")}
-            >
-              BRAKE
-            </button>
-            <button
-              type="button"
-              className={`touch-btn jump ${activeBtns.jump ? "active" : ""}`}
-              {...bindHold("jump")}
-            >
-              JUMP
-            </button>
-            <button
-              type="button"
-              className={`touch-btn gas ${activeBtns.accel ? "active" : ""}`}
-              {...bindHold("accel")}
-            >
-              GAS
-            </button>
-          </div>
+
+          {/* Center: action cluster (skills + jump) */}
           <div className="zone btn-cluster">
             <button
               type="button"
@@ -683,10 +688,69 @@ export function GameApp() {
             </button>
             <button
               type="button"
+              className={`touch-btn jump ${activeBtns.jump ? "active" : ""}`}
+              {...bindHold("jump")}
+            >
+              JUMP
+            </button>
+            <button
+              type="button"
               className={`touch-btn ${activeBtns.sprint ? "active" : ""}`}
               {...bindHold("sprint")}
             >
               SPRINT
+            </button>
+          </div>
+
+          {/* Right: vertical BRAKE over GAS (multitouch-safe) */}
+          <div className="zone accel-col">
+            <button
+              type="button"
+              className={`touch-btn brake-btn ${activeBtns.brake ? "active" : ""}`}
+              {...bindHold("brake")}
+            >
+              BRAKE
+            </button>
+            <button
+              type="button"
+              className={`touch-btn gas ${activeBtns.accel ? "active" : ""}`}
+              {...bindHold("accel")}
+            >
+              GAS
+            </button>
+          </div>
+
+          {/* CAM mode cycle + zoom */}
+          <div className="zone cam-bar">
+            <button
+              type="button"
+              className="touch-btn cam-btn"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                engineRef.current?.cycleCamMode(1);
+              }}
+            >
+              CAM
+            </button>
+            <button
+              type="button"
+              className="touch-btn cam-btn"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                engineRef.current?.adjustCamZoom(-0.1);
+              }}
+            >
+              CAM −
+            </button>
+            <button
+              type="button"
+              className="touch-btn cam-btn"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                engineRef.current?.adjustCamZoom(0.1);
+              }}
+            >
+              CAM +
             </button>
           </div>
         </div>

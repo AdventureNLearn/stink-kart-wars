@@ -86,6 +86,15 @@ type Pickup = {
   life: number;
 };
 
+
+/** Four chase angles — product labels match mobile CAM HUD. */
+export const CAM_MODES = [
+  { id: "chase", label: "CHASE", dist: 10, height: 4.6, lookAhead: 5, baseFov: 60 },
+  { id: "near", label: "NEAR", dist: 6.2, height: 3.2, lookAhead: 4, baseFov: 68 },
+  { id: "high", label: "HIGH", dist: 14, height: 11, lookAhead: 2, baseFov: 58 },
+  { id: "nose", label: "NOSE", dist: 2.4, height: 2.1, lookAhead: 10, baseFov: 72 },
+] as const;
+
 let eid = 1;
 
 export class KartEngine {
@@ -141,6 +150,14 @@ export class KartEngine {
   location = "No Man's Land";
   trauma = 0;
 
+  /** Active camera mode index into CAM_MODES. */
+  camMode = 0;
+  /** 0 = farthest (zoomed out), 1 = closest (zoomed in). */
+  camZoom = 0.45;
+  tickCount = 0;
+  softwareGL = false;
+  private renderDebt = 0;
+
   private clock = new THREE.Timer();
   private running = false;
   private raf = 0;
@@ -159,6 +176,8 @@ export class KartEngine {
   private canvas: HTMLCanvasElement;
   private pmrem?: THREE.PMREMGenerator;
   private dustTimer = 0;
+  private landmarkAuras: THREE.PointLight[] = [];
+  private prevHopHeld = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -170,11 +189,33 @@ export class KartEngine {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Software GL (CI / headless / SwiftShader) cannot take full open-world cost
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    let glSoft = /SwiftShader|llvmpipe|Software/i.test(ua);
+    try {
+      const gl = this.renderer.getContext() as WebGLRenderingContext;
+      const dbg = gl?.getExtension?.("WEBGL_debug_renderer_info");
+      if (dbg) {
+        const rendererInfo = String(
+          gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || "",
+        );
+        if (/SwiftShader|llvmpipe|Software|Microsoft Basic/i.test(rendererInfo)) {
+          glSoft = true;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    this.softwareGL = glSoft;
+    this.renderer.shadowMap.enabled = !this.softwareGL;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.92;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    if (this.softwareGL) {
+      this.renderer.setPixelRatio(1);
+      this.settings = { ...this.settings, detail: "low" };
+    }
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
@@ -195,23 +236,32 @@ export class KartEngine {
     this.wireControlsTest();
   }
 
-  /** Layer 6 post: light bloom + output. */
+  /** Layer 6 post. Skip bloom on software GL — it can stall the frame loop. */
   private setupPost() {
     const w = this.canvas.clientWidth || 1280;
     const h = this.canvas.clientHeight || 720;
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    if (this.settings.detail === "high") {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const softwareGL = /SwiftShader|llvmpipe|Software/i.test(ua);
+    const useBloom = this.settings.detail === "high" && !softwareGL && w >= 800;
+    if (!useBloom) {
+      this.composer = null;
+      return;
+    }
+    try {
+      this.composer = new EffectComposer(this.renderer);
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
       const bloom = new UnrealBloomPass(
         new THREE.Vector2(Math.floor(w * 0.5), Math.floor(h * 0.5)),
-        0.18,
-        0.4,
-        0.88,
+        0.1,
+        0.3,
+        0.92,
       );
       this.composer.addPass(bloom);
+      this.composer.addPass(new OutputPass());
+      this.composer.setSize(w, h);
+    } catch {
+      this.composer = null;
     }
-    this.composer.addPass(new OutputPass());
-    this.composer.setSize(w, h);
   }
 
   setHudCallback(cb: (h: HudSnapshot) => void) {
@@ -238,25 +288,43 @@ export class KartEngine {
     }
   }
 
+  /** Cycle CHASE → NEAR → HIGH → NOSE. */
+  cycleCamMode(dir: 1 | -1 = 1) {
+    const n = CAM_MODES.length;
+    this.camMode = (this.camMode + dir + n) % n;
+    this.announce = CAM_MODES[this.camMode]!.label;
+    this.announceTimer = 0.55;
+  }
+
+  /** Zoom in (+) or out (−). zoom 1 = closest. */
+  adjustCamZoom(delta: number) {
+    this.camZoom = THREE.MathUtils.clamp(this.camZoom + delta, 0, 1);
+  }
+
   private buildScene() {
     this.scene.clear();
-    // Layer 6 atmosphere
+    this.landmarkAuras = [];
+    // Layer 6 atmosphere — no global PointLight haze
     this.scene.background = new THREE.Color(0x2a100c);
-    this.scene.fog = new THREE.FogExp2(0x2e140f, 0.00235);
+    this.scene.fog = new THREE.FogExp2(0x2e140f, 0.0021);
 
-    // Environment reflections for Physical materials (shared, once)
-    if (!this.pmrem) {
-      this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    // Controlled weak PMREM for Physical clearcoat/slime (skip on software GL)
+    if (!this.softwareGL) {
+      if (!this.pmrem) {
+        this.pmrem = new THREE.PMREMGenerator(this.renderer);
+      }
       const envScene = new RoomEnvironment();
-      this.scene.environment = this.pmrem.fromScene(envScene, 0.04).texture;
-    } else if (!this.scene.environment) {
-      const envScene = new RoomEnvironment();
-      this.scene.environment = this.pmrem.fromScene(envScene, 0.04).texture;
+      this.scene.environment = this.pmrem.fromScene(envScene, 0.02).texture;
+      (
+        this.scene as THREE.Scene & { environmentIntensity?: number }
+      ).environmentIntensity = 0.28;
+    } else {
+      this.scene.environment = null;
     }
 
-    const hemi = new THREE.HemisphereLight(0xffd0a8, 0x1a0c08, 0.95);
+    const hemi = new THREE.HemisphereLight(0xffd0a8, 0x1a0c08, 0.88);
     this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffe8d0, 1.85);
+    const sun = new THREE.DirectionalLight(0xffe8d0, 1.65);
     sun.position.set(90, 140, 50);
     sun.castShadow = this.settings.detail !== "low";
     sun.shadow.mapSize.set(
@@ -271,28 +339,18 @@ export class KartEngine {
     sun.shadow.bias = -0.00025;
     sun.shadow.normalBias = 0.035;
     this.scene.add(sun);
-    this.scene.add(new THREE.AmbientLight(0x2a1814, 0.42));
-    const fill = new THREE.DirectionalLight(0x6a88cc, 0.45);
+    this.scene.add(new THREE.AmbientLight(0x2a1814, 0.38));
+    const fill = new THREE.DirectionalLight(0x6a88cc, 0.38);
     fill.position.set(-50, 30, -40);
     this.scene.add(fill);
-    // rim / atmosphere
-    const rim = new THREE.DirectionalLight(0xff6633, 0.28);
+    const rim = new THREE.DirectionalLight(0xff6633, 0.22);
     rim.position.set(0, 20, -80);
     this.scene.add(rim);
-
-    const glow1 = new THREE.PointLight(0xff4422, 1.35, 140);
-    glow1.position.set(180, 22, 160);
-    this.scene.add(glow1);
-    const glow2 = new THREE.PointLight(0x3dcc5a, 1.0, 110);
-    glow2.position.set(-100, 18, 50);
-    this.scene.add(glow2);
-    const glow3 = new THREE.PointLight(0x22d3ee, 0.7, 90);
-    glow3.position.set(210, 12, -35);
-    this.scene.add(glow3);
 
     this.world = buildOpenWorld(this.settings.detail);
     this.scene.add(this.world.group);
     this.scene.add(this.particles.points);
+    this.attachLandmarkAuras();
 
     this.playerMesh = createStinkyKart();
     this.scene.add(this.playerMesh);
@@ -301,6 +359,45 @@ export class KartEngine {
     this.spawnArmy();
     this.camPos.set(0, 14, 20);
     this.camLook.set(0, 1, 0);
+  }
+
+  /** Layer 6: short-range practical lights at landmarks only. */
+  private attachLandmarkAuras() {
+    if (this.softwareGL) return;
+    const auraSpecs: {
+      id: string;
+      color: number;
+      intensity: number;
+      dist: number;
+      y: number;
+    }[] = [
+      { id: "beacon", color: 0x3dcc5a, intensity: 0.55, dist: 42, y: 6 },
+      { id: "scrap", color: 0xf59e0b, intensity: 0.4, dist: 36, y: 5 },
+      { id: "outpost", color: 0x22d3ee, intensity: 0.35, dist: 40, y: 5 },
+      { id: "throne", color: 0xff4422, intensity: 0.5, dist: 48, y: 8 },
+      { id: "korus", color: 0xa855f7, intensity: 0.45, dist: 38, y: 6 },
+      { id: "garage", color: 0x88aacc, intensity: 0.3, dist: 28, y: 4 },
+    ];
+    for (const lm of this.world.landmarks) {
+      const spec = auraSpecs.find(
+        (s) => lm.id === s.id || lm.id.includes(s.id),
+      );
+      if (!spec) continue;
+      const light = new THREE.PointLight(
+        spec.color,
+        spec.intensity,
+        spec.dist,
+        2,
+      );
+      light.position.set(
+        lm.x,
+        this.world.groundY(lm.x, lm.z) + spec.y,
+        lm.z,
+      );
+      light.castShadow = false;
+      this.scene.add(light);
+      this.landmarkAuras.push(light);
+    }
   }
 
   private resetPlayer(x: number, z: number) {
@@ -313,6 +410,7 @@ export class KartEngine {
     this.player.vy = 0;
     this.player.airborne = false;
     this.player.jumpLock = false;
+    this.prevHopHeld = false;
     this.player.hp = this.player.maxHp;
     this.player.stink = this.player.maxStink;
     this.player.invuln = 3.5;
@@ -448,6 +546,7 @@ export class KartEngine {
     gameAudio.playUiClick();
     gameAudio.startMusic(1);
     gameAudio.setRacing(true);
+    this.wireControlsTest();
     this.phase = "playing";
     this.quests = makeQuestRuntime();
     this.storyFlags.clear();
@@ -512,33 +611,67 @@ export class KartEngine {
   start() {
     if (this.running) return;
     this.running = true;
-    this.clock.connect(document);
+    try {
+      this.clock.connect(document);
+    } catch {
+      /* optional */
+    }
     this.clock.reset();
     const loop = () => {
+      if (!this.running) return;
+      // Always re-schedule first so a slow render cannot kill the sim forever
       this.raf = requestAnimationFrame(loop);
-      this.clock.update();
-      let dt = this.clock.getDelta();
-      if (dt <= 0 || !isFinite(dt)) dt = 1 / 60;
-      dt = Math.min(dt, 0.1);
-      this.fixedAcc += dt;
-      let steps = 0;
-      while (this.fixedAcc >= this.fixedDt && steps < 5) {
-        this.fixedUpdate(this.fixedDt);
-        this.fixedAcc -= this.fixedDt;
-        steps++;
-      }
-      if (this.fixedAcc >= this.fixedDt) this.fixedAcc = 0;
-      // Layer 6 post path
-      if (this.composer) this.composer.render();
-      else this.renderer.render(this.scene, this.camera);
-      this.drawMinimap();
-      this.lastHud += dt;
-      if (this.lastHud > 0.05) {
-        this.lastHud = 0;
-        this.emitHud();
+      try {
+        this.clock.update();
+        let dt = this.clock.getDelta();
+        if (dt <= 0 || !isFinite(dt)) dt = 1 / 60;
+        dt = Math.min(dt, 0.05);
+        this.fixedAcc += dt;
+        let steps = 0;
+        while (this.fixedAcc >= this.fixedDt && steps < 5) {
+          this.fixedUpdate(this.fixedDt);
+          this.fixedAcc -= this.fixedDt;
+          steps++;
+        }
+        if (this.fixedAcc >= this.fixedDt) this.fixedAcc = 0;
+
+        // Render with skip debt when frames are heavy (software GL / big world)
+        if (this.renderDebt > 0) {
+          this.renderDebt--;
+        } else {
+          const t0 = performance.now();
+          try {
+            if (this.composer) this.composer.render();
+            else this.renderer.render(this.scene, this.camera);
+          } catch {
+            this.composer = null;
+            try {
+              this.renderer.render(this.scene, this.camera);
+            } catch {
+              /* ignore */
+            }
+          }
+          const cost = performance.now() - t0;
+          if (cost > 40) this.renderDebt = this.softwareGL ? 3 : 1;
+          if (!this.softwareGL) this.drawMinimap();
+        }
+
+        this.lastHud += dt;
+        if (this.lastHud > 0.05) {
+          this.lastHud = 0;
+          this.emitHud();
+        }
+      } catch (err) {
+        console.warn("[SKW] frame error", err);
       }
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  /** Test helper: advance simulation without waiting on RAF/render. */
+  stepSim(seconds = 0.25) {
+    const steps = Math.max(1, Math.round(seconds / this.fixedDt));
+    for (let i = 0; i < steps; i++) this.fixedUpdate(this.fixedDt);
   }
 
   stop() {
@@ -554,6 +687,9 @@ export class KartEngine {
     this.pmrem?.dispose();
     this.renderer.dispose();
     gameAudio.dispose();
+    if (typeof window !== "undefined" && window.__kartEngine === this) {
+      window.__kartEngine = undefined;
+    }
   }
 
   private activeQuest(): QuestRuntime | null {
@@ -601,6 +737,7 @@ export class KartEngine {
   }
 
   private fixedUpdate(dt: number) {
+    this.tickCount++;
     if (this.phase === "title") {
       const t = performance.now() * 0.00015;
       this.camera.position.set(
@@ -738,13 +875,22 @@ export class KartEngine {
 
     const maxSpeed = (42 + p.level * 1.8) * (p.sprint ? 1.45 : 1);
     const accel = 48 * (p.sprint ? 1.25 : 1);
-    if (throttle > 0) p.speed += accel * throttle * dt;
-    else if (throttle < 0) p.speed += accel * 1.4 * throttle * dt;
-    else p.speed *= 1 - 0.9 * dt;
+    const thr = throttle;
+    // Forward / hard-brake / reverse gear — BRAKE and S reverse properly
+    if (thr > 0.05) {
+      if (p.speed < -0.5) p.speed += accel * 2.6 * thr * dt;
+      else p.speed += accel * thr * dt;
+    } else if (thr < -0.05) {
+      if (p.speed > 1.5) p.speed += accel * 2.4 * thr * dt;
+      else p.speed += accel * 1.25 * thr * dt;
+    } else {
+      p.speed *= 1 - 0.85 * dt;
+      if (Math.abs(p.speed) < 0.12) p.speed = 0;
+    }
 
     if (p.speed > maxSpeed)
       p.speed = THREE.MathUtils.lerp(p.speed, maxSpeed, 1 - Math.exp(-3 * dt));
-    if (p.speed < -maxSpeed * 0.4) p.speed = -maxSpeed * 0.4;
+    if (p.speed < -maxSpeed * 0.55) p.speed = -maxSpeed * 0.55;
 
     const sf = THREE.MathUtils.clamp(Math.abs(p.speed) / 8, 0.15, 1);
     // snappy steer
@@ -777,8 +923,10 @@ export class KartEngine {
     const groundY = this.world.groundY(p.x, p.z) + RIDE_HEIGHT;
     const JUMP_VY = 13.5;
     const GRAVITY = 32;
-    // Edge hop only jumps when grounded; hold does not multi-jump
-    if (input.hop && !p.airborne && !p.jumpLock) {
+    // Engine-side hop edge (survives double-sample / dialogue Space)
+    const hopEdge = (input.hopHeld && !this.prevHopHeld) || input.hop;
+    this.prevHopHeld = !!input.hopHeld;
+    if (hopEdge && !p.airborne && !p.jumpLock) {
       p.vy = JUMP_VY;
       p.airborne = true;
       p.jumpLock = true;
@@ -790,8 +938,7 @@ export class KartEngine {
         vy: 3,
       });
     }
-    // Unlock re-jump once hop is released and we are on the ground
-    if (!input.hop && !p.airborne) p.jumpLock = false;
+    if (!input.hopHeld && !p.airborne) p.jumpLock = false;
 
     if (p.airborne) {
       p.vy -= GRAVITY * dt;
@@ -1518,10 +1665,14 @@ export class KartEngine {
 
   private updateCamera(dt: number, lookBack: boolean) {
     const p = this.player;
+    const mode = CAM_MODES[this.camMode] ?? CAM_MODES[0]!;
     const fx = -Math.sin(p.yaw);
     const fz = -Math.cos(p.yaw);
-    const dist = 10 + Math.min(4, Math.abs(p.speed) * 0.05);
-    const height = 4.5 + Math.min(1.5, Math.abs(p.speed) * 0.02);
+    const zScale = THREE.MathUtils.lerp(1.35, 0.62, this.camZoom);
+    const dist =
+      mode.dist * zScale + Math.min(3.5, Math.abs(p.speed) * 0.04);
+    const height =
+      mode.height * zScale + Math.min(1.2, Math.abs(p.speed) * 0.015);
     const back = lookBack ? -1 : 1;
     const desired = new THREE.Vector3(
       p.x - fx * dist * back,
@@ -1531,9 +1682,9 @@ export class KartEngine {
     const k = 1 - Math.exp(-7 * dt);
     this.camPos.lerp(desired, k);
     const look = new THREE.Vector3(
-      p.x + fx * 5 * back,
-      p.y + 1.3,
-      p.z + fz * 5 * back,
+      p.x + fx * mode.lookAhead * back,
+      p.y + (mode.id === "nose" ? 1.0 : 1.3),
+      p.z + fz * mode.lookAhead * back,
     );
     this.camLook.lerp(look, k);
 
@@ -1545,7 +1696,10 @@ export class KartEngine {
       this.camPos.z + Math.sin(t * 1.3) * shake * 0.5,
     );
     this.camera.lookAt(this.camLook);
-    const targetFov = 60 + Math.min(16, Math.abs(p.speed) * 0.2);
+    const targetFov =
+      mode.baseFov +
+      Math.min(14, Math.abs(p.speed) * 0.18) -
+      this.camZoom * 4;
     this.camera.fov = THREE.MathUtils.lerp(
       this.camera.fov,
       targetFov,
@@ -1615,7 +1769,7 @@ export class KartEngine {
       xp: this.player.xp,
       level: this.player.level,
       scrap: this.player.scrap,
-      speed: Math.abs(this.player.speed),
+      speed: this.player.speed,
       kills: this.player.kills,
       questTitle: def?.title ?? "All quests complete",
       questObjective: def?.objective ?? "Dominate the ZeroVerse battlefield.",
@@ -1628,27 +1782,105 @@ export class KartEngine {
       bossHp: this.boss?.alive ? this.boss.hp : null,
       bossMax: this.boss?.maxHp ?? null,
       location: this.location,
+      camMode: (CAM_MODES[this.camMode] ?? CAM_MODES[0]!).label,
+      camZoom: this.camZoom,
     });
   }
 
   private wireControlsTest() {
     if (typeof window === "undefined") return;
+    window.__kartEngine = this;
     window.__controlsTest = {
       getYaw: () => this.player?.yaw ?? 0,
       getSpeed: () => this.player?.speed ?? 0,
+      getAirborne: () => this.player?.airborne ?? false,
+      getVy: () => this.player?.vy ?? 0,
+      getCamMode: () =>
+        (CAM_MODES[this.camMode] ?? CAM_MODES[0]!).label,
+      getCamZoom: () => this.camZoom,
+      getPhase: () => this.phase,
+      getPlayer: () => ({
+        x: this.player.x,
+        z: this.player.z,
+        speed: this.player.speed,
+        yaw: this.player.yaw,
+        airborne: this.player.airborne,
+      }),
       setSteer: (v: number) => this.input.setSteer(v),
       setKeys: (codes: string[]) => this.input.setKeys(codes),
+      setTouchGas: (v: boolean) => {
+        this.input.touchGas = v;
+      },
+      setTouchBrake: (v: boolean) => {
+        this.input.touchBrake = v;
+      },
+      setTouchHop: (v: boolean) => {
+        this.input.touchHop = v;
+      },
+      getTouchFlags: () => ({
+        gas: this.input.touchGas,
+        brake: this.input.touchBrake,
+        hop: this.input.touchHop,
+        autoAccel: this.input.autoAccel,
+        keys: [...this.input.keys],
+      }),
+      clearDialogue: () => {
+        this.dialogue = null;
+      },
+      setAutoAccel: (v: boolean) => {
+        this.input.autoAccel = v;
+      },
+      forceJump: () => {
+        const p = this.player;
+        if (!p.airborne) {
+          p.vy = 13.5;
+          p.airborne = true;
+          p.jumpLock = true;
+        }
+      },
+      cycleCam: (dir: 1 | -1 = 1) => this.cycleCamMode(dir),
+      adjustZoom: (d: number) => this.adjustCamZoom(d),
+      stepSim: (s = 0.25) => this.stepSim(s),
     };
   }
 }
 
 declare global {
   interface Window {
+    __kartEngine?: KartEngine;
     __controlsTest?: {
       getYaw: () => number;
       getSpeed: () => number;
+      getAirborne?: () => boolean;
+      getVy?: () => number;
+      getCamMode?: () => string;
+      getCamZoom?: () => number;
+      getPhase?: () => string;
+      getPlayer?: () => {
+        x: number;
+        z: number;
+        speed: number;
+        yaw: number;
+        airborne: boolean;
+      };
+      getTouchFlags?: () => {
+        gas: boolean;
+        brake: boolean;
+        hop: boolean;
+        autoAccel: boolean;
+        keys: string[];
+      };
       setSteer?: (v: number) => void;
       setKeys?: (codes: string[]) => void;
+      setTouchGas?: (v: boolean) => void;
+      setTouchBrake?: (v: boolean) => void;
+      setTouchHop?: (v: boolean) => void;
+      clearDialogue?: () => void;
+      setAutoAccel?: (v: boolean) => void;
+      forceJump?: () => void;
+      cycleCam?: (dir?: 1 | -1) => void;
+      adjustZoom?: (d: number) => void;
+      stepSim?: (s?: number) => void;
     };
   }
 }

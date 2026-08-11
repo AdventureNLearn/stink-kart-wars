@@ -4,6 +4,8 @@ export interface InputState {
   throttle: number;
   steer: number; // +1 = left (A)
   hop: boolean;
+  /** Continuous hop hold (for jumpLock unlock + touch JUMP). */
+  hopHeld: boolean;
   drift: boolean;
   useItem: boolean;
   skill: boolean;
@@ -54,6 +56,7 @@ export interface HudSnapshot {
   xp: number;
   level: number;
   scrap: number;
+  /** Signed speed — negative when reversing. */
   speed: number;
   kills: number;
   questTitle: string;
@@ -67,6 +70,8 @@ export interface HudSnapshot {
   bossHp: number | null;
   bossMax: number | null;
   location: string;
+  camMode: string;
+  camZoom: number;
 }
 
 export const COLORS = {

@@ -661,7 +661,7 @@
   margin: 0;
 }
 
-/* Touch */
+/* Touch — stick | action cluster | vertical GAS/BRAKE | CAM */
 .touch-controls {
   position: absolute;
   inset: 0;
@@ -676,10 +676,10 @@
 }
 
 .stick-base {
-  bottom: 1.25rem;
-  left: 1rem;
-  width: 120px;
-  height: 120px;
+  bottom: 1.1rem;
+  left: 0.85rem;
+  width: 118px;
+  height: 118px;
   border-radius: 50%;
   background: #0d121888;
   border: 2px solid #3dcc5a55;
@@ -688,34 +688,58 @@
 }
 
 .stick-knob {
-  width: 52px;
-  height: 52px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   background: #3dcc5acc;
   border: 2px solid #8dff9e;
   box-shadow: 0 4px 12px #0008;
 }
 
+/* Center action cluster — DRIFT STINK OOZE JUMP SPRINT */
 .btn-cluster {
-  bottom: 1.25rem;
-  right: 0.75rem;
-  display: grid;
-  grid-template-columns: repeat(2, 58px);
+  bottom: 1.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+  width: min(280px, 58vw);
+  max-width: calc(100vw - 200px);
+}
+
+/* Vertical BRAKE over GAS — separated from skills so reverse never fights gas */
+.accel-col {
+  bottom: 1.1rem;
+  right: 0.7rem;
+  display: flex;
+  flex-direction: column;
   gap: 0.55rem;
 }
 
 .touch-btn {
-  width: 58px;
-  height: 58px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   border: 2px solid #ffffff33;
   background: #12161fbb;
   color: #fff;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 800;
+  letter-spacing: 0.02em;
   display: grid;
   place-items: center;
   box-shadow: 0 4px 14px #0008;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.accel-col .touch-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  font-size: 0.72rem;
 }
 
 .touch-btn.active {
@@ -738,27 +762,71 @@
 }
 .touch-btn.gas {
   border-color: #3dcc5aaa;
+  background: #0d2818cc;
+}
+.touch-btn.brake-btn {
+  border-color: #ff6644aa;
+  background: #2a1010cc;
 }
 
-.accel-row {
-  bottom: 7.5rem;
-  right: 0.75rem;
+/* CAM bar — top right under pause */
+.cam-bar {
+  top: calc(var(--grok-banner-h, 0px) + 3.4rem);
+  right: 0.55rem;
   display: flex;
-  gap: 0.45rem;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cam-btn {
+  width: 52px !important;
+  height: 40px !important;
+  border-radius: 10px !important;
+  font-size: 0.55rem !important;
+  background: #0d1218cc !important;
+  border-color: #22d3ee66 !important;
+}
+
+.cam-hud-pill {
+  background: var(--color-hud);
+  border: 1px solid #22d3ee55;
+  border-radius: 12px;
+  padding: 0.35rem 0.55rem;
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 72px;
+}
+
+.cam-mode-label {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #7dd3fc;
+}
+
+.cam-zoom-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--color-muted);
 }
 
 @media (min-width: 768px) {
   .touch-controls {
     display: none;
   }
+  .cam-bar {
+    display: none;
+  }
 }
 
 @media (max-width: 767px) {
   .rpg-bottom {
-    bottom: 9.5rem;
+    bottom: 9.8rem;
   }
   .dialogue-box {
-    bottom: 11rem;
+    bottom: 11.2rem;
   }
   .minimap {
     width: 88px;
@@ -766,5 +834,11 @@
   }
   .skill-hints {
     display: none;
+  }
+  .cam-hud-pill {
+    position: absolute;
+    top: calc(var(--grok-banner-h, 0px) + 0.55rem);
+    left: 50%;
+    transform: translateX(-50%);
   }
 }
