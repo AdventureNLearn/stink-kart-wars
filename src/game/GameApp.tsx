@@ -434,7 +434,7 @@ export function GameApp() {
             </div>
             <img
               className="stinky-avatar"
-              src="/stinky-avatar.jpg"
+              src="/stinky-avatar.png"
               alt="Stinky the Slime"
               draggable={false}
             />
