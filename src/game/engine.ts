@@ -107,6 +107,11 @@ export class KartEngine {
     yaw: 0,
     speed: 0,
     lateral: 0,
+    /** Vertical velocity for jump / stomp. */
+    vy: 0,
+    airborne: false,
+    /** Blocks re-jump until release + land. */
+    jumpLock: false,
     hp: 120,
     maxHp: 120,
     stink: 100,
@@ -305,6 +310,9 @@ export class KartEngine {
     this.player.yaw = 0;
     this.player.speed = 0;
     this.player.lateral = 0;
+    this.player.vy = 0;
+    this.player.airborne = false;
+    this.player.jumpLock = false;
     this.player.hp = this.player.maxHp;
     this.player.stink = this.player.maxStink;
     this.player.invuln = 3.5;
@@ -764,7 +772,45 @@ export class KartEngine {
     const lim = 320;
     p.x = THREE.MathUtils.clamp(p.x, -lim, lim);
     p.z = THREE.MathUtils.clamp(p.z, -lim, lim);
-    p.y = this.world.groundY(p.x, p.z) + RIDE_HEIGHT;
+
+    // ── Jump / stomp vertical physics ──
+    const groundY = this.world.groundY(p.x, p.z) + RIDE_HEIGHT;
+    const JUMP_VY = 13.5;
+    const GRAVITY = 32;
+    // Edge hop only jumps when grounded; hold does not multi-jump
+    if (input.hop && !p.airborne && !p.jumpLock) {
+      p.vy = JUMP_VY;
+      p.airborne = true;
+      p.jumpLock = true;
+      gameAudio.playHop();
+      this.particles.emit(p.x, p.y, p.z, 10, {
+        color: 0xc45c2a,
+        speed: 4,
+        life: 0.35,
+        vy: 3,
+      });
+    }
+    // Unlock re-jump once hop is released and we are on the ground
+    if (!input.hop && !p.airborne) p.jumpLock = false;
+
+    if (p.airborne) {
+      p.vy -= GRAVITY * dt;
+      p.y += p.vy * dt;
+      if (p.y <= groundY && p.vy <= 0) {
+        p.y = groundY;
+        p.vy = 0;
+        p.airborne = false;
+        this.particles.emit(p.x, p.y, p.z, 6, {
+          color: 0x8a6040,
+          speed: 2.5,
+          life: 0.25,
+          vy: 1.2,
+        });
+      }
+    } else {
+      p.y = groundY;
+      p.vy = 0;
+    }
 
     const sphere: Sphere = { x: p.x, y: p.y, z: p.z, r: 1.5 };
     for (const box of this.world.colliders) {
@@ -802,6 +848,45 @@ export class KartEngine {
 
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      const dx = p.x - e.x;
+      const dz = p.z - e.z;
+      const distXZ = Math.hypot(dx, dz);
+      const touchR = 1.5 + e.radius;
+      if (distXZ > touchR) continue;
+
+      // Stomp: airborne, above enemy, falling → KO / chunk
+      const above = p.y > e.y + e.radius * 0.35;
+      if (p.airborne && above) {
+        if (p.vy < 0) {
+          // STOMP hit
+          const isHeavy =
+            e.isBoss || e.kind === "tank" || e.kind === "artillery";
+          if (isHeavy) {
+            this.damageEnemy(e, 55 + p.level * 4);
+            p.vy = 10; // bounce
+            p.airborne = true;
+            this.announce = "STOMP!";
+            this.announceTimer = 0.7;
+          } else {
+            this.damageEnemy(e, 999); // raiders / drones / bandits one-shot
+            p.vy = 7;
+            p.airborne = true;
+            this.announce = "STOMP KO!";
+            this.announceTimer = 0.85;
+          }
+          this.trauma = Math.min(1, this.trauma + 0.35);
+          this.particles.emit(e.x, e.y + 1.5, e.z, 18, {
+            color: 0x3dcc5a,
+            speed: 8,
+            life: 0.5,
+            vy: 5,
+          });
+          gameAudio.playExplosion();
+        }
+        // pass-through while above (no body bump)
+        continue;
+      }
+
       const push = resolveSphereSphere(sphere, {
         x: e.x,
         y: e.y,
@@ -834,16 +919,6 @@ export class KartEngine {
       gameAudio.playFart("big");
       gameAudio.playBoost();
       this.trauma = Math.min(1, this.trauma + 0.45);
-    }
-    if (input.hop) {
-      p.speed += 5;
-      gameAudio.playHop();
-      this.particles.emit(p.x, p.y, p.z, 8, {
-        color: 0xc45c2a,
-        speed: 3,
-        life: 0.3,
-        vy: 2,
-      });
     }
 
     for (const o of this.world.objects) {

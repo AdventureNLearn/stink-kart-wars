@@ -118,6 +118,83 @@
   filter: drop-shadow(0 0 18px #3dcc5a55);
 }
 
+/* Cover page — Stinky avatar + hero battlefield */
+.cover-screen {
+  position: relative;
+  isolation: isolate;
+  /* Let hero image show through (parent .start-screen has opaque gradient) */
+  background: transparent !important;
+}
+
+.cover-hero {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cover-hero-bg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 35%;
+  filter: saturate(1.1) contrast(1.05);
+  transform: scale(1.04);
+}
+
+.cover-hero-fade {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 18%, #3dcc5a22 0%, transparent 55%),
+    linear-gradient(180deg, #0a0c10aa 0%, #0a0c10e6 48%, #0a0c10f8 100%);
+}
+
+.cover-screen > :not(.cover-hero) {
+  position: relative;
+  z-index: 1;
+}
+
+.stinky-avatar {
+  width: clamp(88px, 22vw, 132px);
+  height: clamp(88px, 22vw, 132px);
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #3dcc5a;
+  box-shadow:
+    0 0 0 3px #e11d2e88,
+    0 0 28px #3dcc5a66,
+    0 8px 24px #000a;
+  margin-top: 0.25rem;
+  background: #1a3020;
+}
+
+.cover-title {
+  margin-top: 0.15rem;
+}
+
+.cover-credit {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #b8c8b8;
+  letter-spacing: 0.02em;
+}
+
+.cover-credit strong {
+  color: #8dff9e;
+}
+
+.cover-x {
+  color: #22d3ee;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.cover-x:hover {
+  text-decoration: underline;
+}
+
 .start-sub {
   color: var(--color-muted);
   font-size: clamp(0.75rem, 2.5vw, 0.95rem);
@@ -654,6 +731,13 @@
 }
 .touch-btn.stink {
   border-color: #3dcc5a88;
+}
+.touch-btn.jump {
+  border-color: #22d3ee88;
+  background: #0d2030bb;
+}
+.touch-btn.gas {
+  border-color: #3dcc5aaa;
 }
 
 .accel-row {

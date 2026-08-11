@@ -10,14 +10,18 @@ export class GameInput {
   keys = new Set<string>();
   bindings: ControlBindings = { ...DEFAULT_BINDINGS };
   touchSteer = 0;
+  /** Legacy combined axis — prefer touchGas / touchBrake so skills never zero throttle. */
   touchThrottle = 0;
+  /** Multitouch-safe: hold GAS without skills wiping drive. */
+  touchGas = false;
+  touchBrake = false;
   touchHop = false;
   touchDrift = false;
   touchItem = false;
   touchSkill = false;
   touchStink = false;
   touchSprint = false;
-  /** When true, throttle defaults to +0.55 if no brake/reverse held. */
+  /** When true, throttle defaults to soft roll if no brake/reverse held. */
   autoAccel = false;
 
   private edgeHop = false;
@@ -109,20 +113,33 @@ export class GameInput {
     let throttle = 0;
     if (this.pressed("throttle") || this.any("KeyW", "ArrowUp")) throttle += 1;
     if (this.pressed("brake") || this.any("KeyS", "ArrowDown")) throttle -= 1;
-    if (Math.abs(this.touchThrottle) > 0.05) throttle = this.touchThrottle;
+
+    // Multitouch GAS/BRAKE flags win over combined stick throttle so skill
+    // buttons never clobber held acceleration.
+    if (this.touchGas) throttle = Math.max(throttle, 1);
+    if (this.touchBrake) throttle = Math.min(throttle, -1);
+    if (!this.touchGas && !this.touchBrake && Math.abs(this.touchThrottle) > 0.05) {
+      throttle = this.touchThrottle;
+    }
+
     // Soft auto-roll only if no reverse and setting on
-    if (throttle === 0 && this.autoAccel && Math.abs(this.touchThrottle) < 0.05) {
+    if (
+      throttle === 0 &&
+      this.autoAccel &&
+      !this.touchBrake &&
+      Math.abs(this.touchThrottle) < 0.05
+    ) {
       throttle = 0.35;
     }
     throttle = Math.max(-1, Math.min(1, throttle));
 
     const hopHeld =
-      this.pressed("hop") || this.any("Space", "KeyC") || this.touchHop;
+      this.pressed("hop") || this.any("Space") || this.touchHop;
+    // Drift is separate from jump — Shift / dedicated drift only (not Space)
     const driftHeld =
       this.pressed("drift") ||
-      this.any("ShiftLeft", "ShiftRight", "KeyC") ||
-      this.touchDrift ||
-      hopHeld;
+      this.any("ShiftLeft", "ShiftRight") ||
+      this.touchDrift;
     const itemHeld =
       this.pressed("useItem") || this.any("KeyX", "KeyF") || this.touchItem;
     const skillHeld =

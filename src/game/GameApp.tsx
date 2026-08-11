@@ -112,8 +112,8 @@ export function GameApp() {
       const cy = rect.top + rect.height / 2;
       const dx = (ev.clientX - cx) / (rect.width * 0.4);
       const dy = (ev.clientY - cy) / (rect.height * 0.4);
+      // Stick is STEER only — gas/brake are dedicated buttons (multitouch-safe)
       engine.input.touchSteer = Math.max(-1, Math.min(1, -dx));
-      engine.input.touchThrottle = Math.max(-1, Math.min(1, -dy));
       const knob = el.querySelector(".stick-knob") as HTMLElement | null;
       if (knob) {
         knob.style.transform = `translate(${Math.max(-1, Math.min(1, dx)) * 28}px, ${Math.max(-1, Math.min(1, dy)) * 28}px)`;
@@ -121,7 +121,6 @@ export function GameApp() {
     };
     const up = () => {
       engine.input.touchSteer = 0;
-      engine.input.touchThrottle = 0;
       const knob = el.querySelector(".stick-knob") as HTMLElement | null;
       if (knob) knob.style.transform = "translate(0,0)";
       window.removeEventListener("pointermove", move);
@@ -132,34 +131,91 @@ export function GameApp() {
     move(e.nativeEvent);
   }, []);
 
-  const hold = useCallback((key: string, on: boolean) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    setActiveBtns((s) => ({ ...s, [key]: on }));
-    switch (key) {
-      case "accel":
-        engine.input.touchThrottle = on ? 1 : 0;
-        break;
-      case "brake":
-        engine.input.touchThrottle = on ? -1 : 0;
-        break;
-      case "drift":
-        engine.input.touchDrift = on;
-        engine.input.touchHop = on;
-        break;
-      case "item":
-        engine.input.touchItem = on;
-        break;
-      case "skill":
-        engine.input.touchSkill = on;
-        break;
-      case "stink":
-        engine.input.touchStink = on;
-        break;
-      case "sprint":
-        engine.input.touchSprint = on;
-        break;
-    }
+  /** Pointer-capture hold so GAS stays down while other fingers hit STINK/OOZE. */
+  const bindHold = useCallback((key: string) => {
+    return {
+      onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const engine = engineRef.current;
+        if (!engine) return;
+        setActiveBtns((s) => ({ ...s, [key]: true }));
+        switch (key) {
+          case "accel":
+            engine.input.touchGas = true;
+            break;
+          case "brake":
+            engine.input.touchBrake = true;
+            break;
+          case "jump":
+            engine.input.touchHop = true;
+            break;
+          case "drift":
+            engine.input.touchDrift = true;
+            break;
+          case "item":
+            engine.input.touchItem = true;
+            break;
+          case "skill":
+            engine.input.touchSkill = true;
+            break;
+          case "stink":
+            engine.input.touchStink = true;
+            break;
+          case "sprint":
+            engine.input.touchSprint = true;
+            break;
+        }
+      },
+      onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        setActiveBtns((s) => ({ ...s, [key]: false }));
+        switch (key) {
+          case "accel":
+            engine.input.touchGas = false;
+            break;
+          case "brake":
+            engine.input.touchBrake = false;
+            break;
+          case "jump":
+            engine.input.touchHop = false;
+            break;
+          case "drift":
+            engine.input.touchDrift = false;
+            break;
+          case "item":
+            engine.input.touchItem = false;
+            break;
+          case "skill":
+            engine.input.touchSkill = false;
+            break;
+          case "stink":
+            engine.input.touchStink = false;
+            break;
+          case "sprint":
+            engine.input.touchSprint = false;
+            break;
+        }
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          /* already released */
+        }
+      },
+      onPointerCancel: (e: React.PointerEvent<HTMLButtonElement>) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        setActiveBtns((s) => ({ ...s, [key]: false }));
+        if (key === "accel") engine.input.touchGas = false;
+        if (key === "brake") engine.input.touchBrake = false;
+        if (key === "jump") engine.input.touchHop = false;
+        if (key === "drift") engine.input.touchDrift = false;
+        if (key === "skill") engine.input.touchSkill = false;
+        if (key === "stink") engine.input.touchStink = false;
+        if (key === "sprint") engine.input.touchSprint = false;
+      },
+    };
   }, []);
 
   const phase = hud?.phase ?? "title";
@@ -289,14 +345,41 @@ export function GameApp() {
           </>
         )}
 
-        {/* Title */}
+        {/* Title / cover */}
         {phase === "title" && (
-          <div className="start-screen interactive menu-screen">
+          <div className="start-screen interactive menu-screen cover-screen">
+            <div className="cover-hero" aria-hidden>
+              <img
+                className="cover-hero-bg"
+                src="/hero-bg.jpg"
+                alt=""
+                draggable={false}
+              />
+              <div className="cover-hero-fade" />
+            </div>
+            <img
+              className="stinky-avatar"
+              src="/stinky-avatar.jpg"
+              alt="Stinky the Slime"
+              draggable={false}
+            />
             <p className="menu-kicker">Open World · Vehicle RPG</p>
-            <h1 className="start-title wars">STINK KART WARS</h1>
+            <h1 className="start-title wars cover-title">STINK KART WARS</h1>
+            <p className="cover-credit">
+              Starring <strong>Stinky the Slime</strong> ·{" "}
+              <a
+                href="https://x.com/stinkycubert"
+                target="_blank"
+                rel="noreferrer"
+                className="cover-x"
+              >
+                @stinkycubert
+              </a>
+            </p>
             <p className="start-sub">
               Full-scale ZeroVerse warfare. Smooth battlefields, epic castles, tanks,
-              cannons, artillery — and Stinky's bandana never comes off.
+              cannons, artillery — and Stinky's bandana never comes off. Jump + stomp
+              raiders. Q stink · E ooze · R sprint · Space hop.
             </p>
 
             <div className="menu-tabs">
@@ -557,18 +640,21 @@ export function GameApp() {
             <button
               type="button"
               className={`touch-btn ${activeBtns.brake ? "active" : ""}`}
-              onPointerDown={() => hold("brake", true)}
-              onPointerUp={() => hold("brake", false)}
-              onPointerLeave={() => hold("brake", false)}
+              {...bindHold("brake")}
             >
               BRAKE
             </button>
             <button
               type="button"
-              className={`touch-btn ${activeBtns.accel ? "active" : ""}`}
-              onPointerDown={() => hold("accel", true)}
-              onPointerUp={() => hold("accel", false)}
-              onPointerLeave={() => hold("accel", false)}
+              className={`touch-btn jump ${activeBtns.jump ? "active" : ""}`}
+              {...bindHold("jump")}
+            >
+              JUMP
+            </button>
+            <button
+              type="button"
+              className={`touch-btn gas ${activeBtns.accel ? "active" : ""}`}
+              {...bindHold("accel")}
             >
               GAS
             </button>
@@ -577,36 +663,28 @@ export function GameApp() {
             <button
               type="button"
               className={`touch-btn drift ${activeBtns.drift ? "active" : ""}`}
-              onPointerDown={() => hold("drift", true)}
-              onPointerUp={() => hold("drift", false)}
-              onPointerLeave={() => hold("drift", false)}
+              {...bindHold("drift")}
             >
               DRIFT
             </button>
             <button
               type="button"
               className={`touch-btn stink ${activeBtns.stink ? "active" : ""}`}
-              onPointerDown={() => hold("stink", true)}
-              onPointerUp={() => hold("stink", false)}
-              onPointerLeave={() => hold("stink", false)}
+              {...bindHold("stink")}
             >
               STINK
             </button>
             <button
               type="button"
               className={`touch-btn skill ${activeBtns.skill ? "active" : ""}`}
-              onPointerDown={() => hold("skill", true)}
-              onPointerUp={() => hold("skill", false)}
-              onPointerLeave={() => hold("skill", false)}
+              {...bindHold("skill")}
             >
               OOZE
             </button>
             <button
               type="button"
               className={`touch-btn ${activeBtns.sprint ? "active" : ""}`}
-              onPointerDown={() => hold("sprint", true)}
-              onPointerUp={() => hold("sprint", false)}
-              onPointerLeave={() => hold("sprint", false)}
+              {...bindHold("sprint")}
             >
               SPRINT
             </button>

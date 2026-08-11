@@ -66,8 +66,28 @@ export type OpenWorld = {
 let _id = 1;
 const nextId = () => _id++;
 
-/** Smooth multi-octave terrain — rolling hills, valleys, mesa, canyon. */
-export function terrainHeight(x: number, z: number): number {
+/**
+ * Hard-flat fort cores so large castles sit level (no floating walls on slopes).
+ * coreR = fully flat; rimR = soft blend back to raw terrain.
+ */
+export const FORT_PADS: {
+  x: number;
+  z: number;
+  coreR: number;
+  rimR: number;
+  /** Target absolute height for the flat pad. */
+  floorY: number;
+}[] = [
+  // Reek Fortress — Throne Mesa
+  { x: 190, z: 175, coreR: 30, rimR: 48, floorY: 9.2 },
+  // Slime Bastion — west ridge
+  { x: -110, z: 55, coreR: 22, rimR: 36, floorY: 3.4 },
+  // Ashen Ruins — south
+  { x: -20, z: -120, coreR: 18, rimR: 30, floorY: 1.6 },
+];
+
+/** Rolling hills / valleys / mesa / canyon — no fort plateaus. */
+export function rawTerrainHeight(x: number, z: number): number {
   // large smooth rolls
   const a =
     Math.sin(x * 0.008) * Math.cos(z * 0.007) * 7 +
@@ -81,7 +101,7 @@ export function terrainHeight(x: number, z: number): number {
     Math.sin(x * 0.05) * Math.cos(z * 0.045) * 0.55 +
     Math.sin(x * 0.09 + z * 0.07) * 0.25;
 
-  // Throne mesa plateau (NE)
+  // Throne mesa plateau (NE) — soft base; FORT_PADS hardens the keep core
   const throne = Math.hypot(x - 190, z - 175);
   const mesa =
     throne < 70
@@ -104,6 +124,101 @@ export function terrainHeight(x: number, z: number): number {
   const ridgeH = ridge < 45 ? 3.5 * Math.pow(1 - ridge / 45, 1.2) : 0;
 
   return a + b + c + mesa + canyon + plain + ridgeH;
+}
+
+/** Lowest raw terrain sample under a circular footprint (for foundations). */
+export function footprintMinY(
+  cx: number,
+  cz: number,
+  radius: number,
+  samples = 16,
+): number {
+  let min = rawTerrainHeight(cx, cz);
+  for (let i = 0; i < samples; i++) {
+    const a = (i / samples) * Math.PI * 2;
+    const r = radius * (0.55 + 0.45 * ((i % 3) / 2));
+    const x = cx + Math.cos(a) * r;
+    const z = cz + Math.sin(a) * r;
+    min = Math.min(min, rawTerrainHeight(x, z));
+  }
+  for (const [dx, dz] of [
+    [radius, 0],
+    [-radius, 0],
+    [0, radius],
+    [0, -radius],
+    [radius * 0.7, radius * 0.7],
+    [-radius * 0.7, radius * 0.7],
+  ] as const) {
+    min = Math.min(min, rawTerrainHeight(cx + dx, cz + dz));
+  }
+  return min;
+}
+
+function fortPadHeight(x: number, z: number, raw: number): number {
+  let y = raw;
+  for (const pad of FORT_PADS) {
+    const d = Math.hypot(x - pad.x, z - pad.z);
+    if (d <= pad.coreR) {
+      y = Math.max(y, pad.floorY);
+    } else if (d < pad.rimR) {
+      const t = (d - pad.coreR) / (pad.rimR - pad.coreR);
+      const blended = THREE.MathUtils.lerp(pad.floorY, raw, t * t);
+      y = Math.max(y, blended);
+    }
+  }
+  return y;
+}
+
+/** Public terrain height: raw + hard-flat FORT_PADS. */
+export function terrainHeight(x: number, z: number): number {
+  const raw = rawTerrainHeight(x, z);
+  return fortPadHeight(x, z, raw);
+}
+
+/** Stone/earth plinth under castles so walls never float above the mesh. */
+export function addCastleFoundation(
+  parent: THREE.Object3D,
+  x: number,
+  z: number,
+  topY: number,
+  radius: number,
+  theme: "reek" | "slime" | "ruins",
+) {
+  const foot = footprintMinY(x, z, radius * 0.95);
+  const thickness = Math.max(2.4, topY - foot + 1.8);
+  const color =
+    theme === "slime" ? 0x2a4030 : theme === "ruins" ? 0x4a4038 : 0x3a3238;
+  const geo = new THREE.CylinderGeometry(
+    radius * 1.05,
+    radius * 1.18,
+    thickness,
+    20,
+  );
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.92,
+      metalness: 0.06,
+    }),
+  );
+  mesh.position.set(x, topY - thickness * 0.5 + 0.15, z);
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
+  mesh.name = "CastleFoundation";
+  parent.add(mesh);
+
+  const berm = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 1.22, radius * 1.35, 1.2, 18),
+    new THREE.MeshStandardMaterial({
+      color: theme === "slime" ? 0x1a3020 : 0x5a3a28,
+      roughness: 0.95,
+      metalness: 0.02,
+    }),
+  );
+  berm.position.set(x, topY - 0.4, z);
+  berm.receiveShadow = true;
+  parent.add(berm);
 }
 
 function mat(color: number, opts: THREE.MeshStandardMaterialParameters = {}) {
@@ -397,6 +512,7 @@ export function buildOpenWorld(
       radius: 70,
     });
     const y = terrainHeight(cx, cz);
+    addCastleFoundation(group, cx, cz, y, 30, "reek");
     const castle = createCastleMesh(1.15, "reek");
     castle.position.set(cx, y, cz);
     pushObj({
@@ -476,6 +592,7 @@ export function buildOpenWorld(
       radius: 55,
     });
     const y = terrainHeight(cx, cz);
+    addCastleFoundation(group, cx, cz, y, 24, "slime");
     const castle = createCastleMesh(0.85, "slime");
     castle.position.set(cx, y, cz);
     pushObj({
@@ -506,6 +623,7 @@ export function buildOpenWorld(
       radius: 40,
     });
     const y = terrainHeight(cx, cz);
+    addCastleFoundation(group, cx, cz, y, 20, "ruins");
     const castle = createCastleMesh(0.7, "ruins");
     castle.position.set(cx, y, cz);
     castle.rotation.y = 0.5;
