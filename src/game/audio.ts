@@ -347,7 +347,10 @@ export class GameAudio {
   }
 
   private ostBlobUrls: string[] = [];
-  private mediaWired = false;
+  /** True while a startMusic kick is in flight — blocks double-starts. */
+  private musicStartLock = false;
+  /** Index of the single currently audible track, or -1 if none. */
+  private activeTrack = -1;
 
   /** Brighten OST through a light presence shelf (keeps MP3 decode pristine). */
   private wireMediaGraph(el: HTMLAudioElement) {
@@ -360,7 +363,7 @@ export class GameAudio {
       presence.type = "peaking";
       presence.frequency.value = 3800;
       presence.Q.value = 0.85;
-      presence.gain.value = 3.5; // presence / crisp mid-highs
+      presence.gain.value = 3.5;
       const air = this.ctx.createBiquadFilter();
       air.type = "highshelf";
       air.frequency.value = 6500;
@@ -368,19 +371,33 @@ export class GameAudio {
       const lowcut = this.ctx.createBiquadFilter();
       lowcut.type = "lowshelf";
       lowcut.frequency.value = 90;
-      lowcut.gain.value = -2; // tidy muddy sub
+      lowcut.gain.value = -2;
       src.connect(lowcut);
       lowcut.connect(presence);
       presence.connect(air);
       air.connect(this.music);
       (el as unknown as { __wired?: boolean }).__wired = true;
-      // When routed through WebAudio, element.volume still works as pre-gain
       el.volume = this.mute
         ? 0
         : Math.max(0, Math.min(1, this.masterVol * this.musicVol));
     } catch (err) {
       console.warn("[ost] media graph wire failed", err);
     }
+  }
+
+  /** Hard-stop every OST element so nothing can layer. */
+  private silenceAllTracks() {
+    this.activeTrack = -1;
+    for (const a of this.trackEls) {
+      a.onended = null;
+      try {
+        a.pause();
+        a.currentTime = 0;
+      } catch {
+        /* */
+      }
+    }
+    this.stopOstSource();
   }
 
   private async preloadOstAssets(): Promise<void> {
@@ -390,7 +407,8 @@ export class GameAudio {
     if (this.ostLoading) return this.ostLoading;
     this.unlock();
     this.ostLoading = (async () => {
-      const els: HTMLAudioElement[] = [];
+      // Pause anything currently playing before swapping elements
+      this.silenceAllTracks();
       for (const u of this.ostBlobUrls) {
         try {
           URL.revokeObjectURL(u);
@@ -402,12 +420,16 @@ export class GameAudio {
       for (const old of this.trackEls) {
         try {
           old.pause();
+          old.removeAttribute("src");
+          old.load();
           old.remove();
         } catch {
           /* */
         }
       }
+      this.trackEls = [];
 
+      const els: HTMLAudioElement[] = [];
       for (const url of this.ostUrls) {
         try {
           const res = await fetch(url, { cache: "force-cache" });
@@ -418,13 +440,12 @@ export class GameAudio {
           this.ostBlobUrls.push(blobUrl);
           const a = new Audio();
           a.preload = "auto";
-          a.loop = false;
+          a.loop = false; // each song plays once, then advance
           a.crossOrigin = "anonymous";
           a.src = blobUrl;
           a.setAttribute("playsinline", "true");
           a.style.display = "none";
           document.body.appendChild(a);
-          // Decode fully before play for zero-stutter starts
           await new Promise<void>((resolve) => {
             const done = () => resolve();
             if (a.readyState >= 3) done();
@@ -441,22 +462,22 @@ export class GameAudio {
         }
       }
       this.trackEls = els;
-      this.ostBuffers = []; // not used — native HTML decode only
+      this.ostBuffers = [];
       this.applyTrackVolumes();
     })();
     return this.ostLoading;
   }
 
   private ensureHtmlTracks() {
-    if (!this.trackEls.length) {
-      this.trackEls = this.ostUrls.map((src) => {
-        const a = new Audio(src);
-        a.preload = "auto";
-        a.loop = false;
-        a.crossOrigin = "anonymous";
-        return a;
-      });
-    }
+    if (this.trackEls.length) return;
+    this.trackEls = this.ostUrls.map((src) => {
+      const a = new Audio(src);
+      a.preload = "auto";
+      a.loop = false;
+      a.crossOrigin = "anonymous";
+      a.setAttribute("playsinline", "true");
+      return a;
+    });
   }
 
   private stopOstSource() {
@@ -476,60 +497,86 @@ export class GameAudio {
     }
   }
 
+  /**
+   * Play exactly one track. Always silences every other element first
+   * so Rider and Carousel never layer.
+   */
   private playHtmlTrackAt(idx: number) {
     if (!this.musicWanted) return;
     if (!this.trackEls.length) this.ensureHtmlTracks();
     if (!this.trackEls.length) return;
-    for (let i = 0; i < this.trackEls.length; i++) {
+
+    const n = this.trackEls.length;
+    const next = ((idx % n) + n) % n;
+
+    // Exclusive: stop all, then start only `next`
+    for (let i = 0; i < n; i++) {
       const el = this.trackEls[i]!;
-      if (i !== idx) {
-        el.onended = null;
-        try {
-          el.pause();
-        } catch {
-          /* */
-        }
+      el.onended = null;
+      if (i === next) continue;
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch {
+        /* */
       }
     }
-    this.trackIdx =
-      ((idx % this.trackEls.length) + this.trackEls.length) %
-      this.trackEls.length;
-    const a = this.trackEls[this.trackIdx]!;
+
+    this.trackIdx = next;
+    this.activeTrack = next;
+    const a = this.trackEls[next]!;
     this.applyTrackVolumes();
     try {
       a.currentTime = 0;
     } catch {
       /* */
     }
+
+    // When this song ends, advance to the other (playlist loop)
     a.onended = () => {
       if (!this.musicWanted) return;
-      this.playHtmlTrackAt(this.trackIdx + 1);
+      // Only advance if this element is still the active one
+      if (this.activeTrack !== next) return;
+      this.playHtmlTrackAt(next + 1);
     };
+
     void a
       .play()
       .then(() => {
         this.musicPlaying = true;
+        // Belt-and-suspenders: if any sibling started somehow, kill it
+        for (let i = 0; i < this.trackEls.length; i++) {
+          if (i === next) continue;
+          const other = this.trackEls[i]!;
+          if (!other.paused) {
+            try {
+              other.pause();
+              other.currentTime = 0;
+            } catch {
+              /* */
+            }
+          }
+        }
       })
       .catch((err) => {
         console.warn("[ost] play blocked", err);
         window.setTimeout(() => {
-          if (!this.musicWanted) return;
+          if (!this.musicWanted || this.activeTrack !== next) return;
           void a.play().then(() => {
             this.musicPlaying = true;
           });
-        }, 60);
+        }, 80);
       });
   }
 
   /**
-   * Crisp OST loop: native MP3 decode via HTMLAudio + light presence EQ.
-   * Call from the Enter click gesture for autoplay.
+   * OST playlist: Slime_Rider → Slime_Carousel → Slime_Rider …
+   * One song at a time — never overlapping.
    */
   startMusic(_seed = 0) {
     this.musicWanted = true;
     this.unlock();
     void this.ctx?.resume();
-    // Linear music bus (no extra squaring — keeps OST full and clear)
     if (this.music && this.ctx) {
       this.music.gain.setTargetAtTime(
         this.mute ? 0 : 1,
@@ -539,19 +586,38 @@ export class GameAudio {
     }
     this.applyVolumes();
 
-    // Immediate attempt (gesture window), then swap to preloaded crisp blobs
-    this.ensureHtmlTracks();
-    this.playHtmlTrackAt(0);
+    // Already playing a single track cleanly — do not re-kick (prevents layering)
+    if (
+      this.musicPlaying &&
+      this.activeTrack >= 0 &&
+      this.trackEls[this.activeTrack] &&
+      !this.trackEls[this.activeTrack]!.paused
+    ) {
+      return;
+    }
 
-    void this.preloadOstAssets().then(() => {
-      if (!this.musicWanted) return;
-      if (this.trackEls.length) {
-        this.playHtmlTrackAt(0);
-      }
-    });
+    if (this.musicStartLock) return;
+    this.musicStartLock = true;
+
+    // Prefer preloaded blob tracks; only one start after assets ready
+    void this.preloadOstAssets()
+      .catch(() => {
+        /* fall through to URL tracks */
+      })
+      .then(() => {
+        if (!this.musicWanted) return;
+        if (!this.trackEls.length) this.ensureHtmlTracks();
+        // Wire URL fallbacks if preload didn't
+        for (const el of this.trackEls) this.wireMediaGraph(el);
+        this.silenceAllTracks();
+        this.playHtmlTrackAt(0); // Rider only; Carousel waits for onended
+      })
+      .finally(() => {
+        this.musicStartLock = false;
+      });
   }
 
-  /** Force restart OST (e.g. user toggled music volume from 0). */
+  /** Force restart OST from track 0 (Rider). */
   restartMusic() {
     this.stopMusic();
     this.startMusic();
@@ -560,7 +626,8 @@ export class GameAudio {
   stopMusic() {
     this.musicWanted = false;
     this.musicPlaying = false;
-    this.stopOstSource();
+    this.musicStartLock = false;
+    this.silenceAllTracks();
     for (const n of this.musicNodes) {
       try {
         if ("stop" in n) (n as OscillatorNode).stop();
@@ -569,21 +636,16 @@ export class GameAudio {
       }
     }
     this.musicNodes = [];
-    for (const a of this.trackEls) {
-      a.onended = null;
-      try {
-        a.pause();
-        a.currentTime = 0;
-      } catch {
-        /* */
-      }
-    }
   }
 
   isMusicPlaying() {
-    if (this.ostSource) return this.musicWanted;
+    if (this.activeTrack >= 0) {
+      const a = this.trackEls[this.activeTrack];
+      if (a && !a.paused && a.currentTime > 0) return true;
+    }
+    // Any non-paused track counts (debug + settings nudge)
     if (this.trackEls.some((a) => !a.paused && a.currentTime > 0)) return true;
-    return this.musicPlaying || this.musicWanted;
+    return this.musicPlaying && this.musicWanted;
   }
 
   debugMusic() {
@@ -594,11 +656,15 @@ export class GameAudio {
       ctx: this.ctx?.state ?? null,
       buffers: this.ostBuffers.length,
       ostIdx: this.ostIdx,
+      activeTrack: this.activeTrack,
+      trackIdx: this.trackIdx,
       hasSource: !!this.ostSource,
-      html: this.trackEls.map((a) => ({
-        src: a.src.split("/").pop(),
+      html: this.trackEls.map((a, i) => ({
+        i,
+        src: a.src.split("/").pop()?.slice(0, 40),
         paused: a.paused,
         t: Math.round(a.currentTime * 10) / 10,
+        dur: Number.isFinite(a.duration) ? Math.round(a.duration) : null,
         vol: a.volume,
         err: a.error?.message ?? a.error?.code ?? null,
         rs: a.readyState,
