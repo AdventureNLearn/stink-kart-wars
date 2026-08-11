@@ -11,6 +11,10 @@ export class GameAudio {
   private engineFilter: BiquadFilterNode | null = null;
   private musicNodes: AudioNode[] = [];
   private musicPlaying = false;
+  /** Looping playlist from public/audio (decoded via HTMLAudioElement). */
+  private trackEls: HTMLAudioElement[] = [];
+  private trackIdx = 0;
+  private usingFileMusic = false;
 
   masterVol = 0.8;
   sfxVol = 0.9;
@@ -58,6 +62,7 @@ export class GameAudio {
     this.master.gain.setTargetAtTime(m, t, 0.02);
     this.sfx.gain.setTargetAtTime(this.sfxVol * this.sfxVol, t, 0.02);
     this.music.gain.setTargetAtTime(this.musicVol * this.musicVol, t, 0.02);
+    this.applyTrackVolumes();
   }
 
   private bus() {
@@ -321,22 +326,70 @@ export class GameAudio {
     return this.racing;
   }
 
-  startMusic(seed = 0) {
-    if (!this.unlocked || !this.ctx || !this.music || this.musicPlaying) return;
+  /** Official OST loop: Slime_Rider → Slime_Carousel → repeat. */
+  private ensureTracks() {
+    if (this.trackEls.length) return;
+    const urls = ["/audio/Slime_Rider.mp3", "/audio/Slime_Carousel.mp3"];
+    this.trackEls = urls.map((src) => {
+      const a = new Audio(src);
+      a.preload = "auto";
+      a.loop = false; // playlist advances; full OST loops via onended
+      a.crossOrigin = "anonymous";
+      return a;
+    });
+  }
+
+  private applyTrackVolumes() {
+    const vol = this.mute ? 0 : this.masterVol * this.musicVol;
+    for (const a of this.trackEls) a.volume = Math.max(0, Math.min(1, vol));
+  }
+
+  private playTrackAt(idx: number) {
+    if (!this.musicPlaying || !this.trackEls.length) return;
+    // pause others
+    for (let i = 0; i < this.trackEls.length; i++) {
+      const el = this.trackEls[i]!;
+      if (i !== idx) {
+        el.pause();
+        el.onended = null;
+      }
+    }
+    this.trackIdx = ((idx % this.trackEls.length) + this.trackEls.length) % this.trackEls.length;
+    const a = this.trackEls[this.trackIdx]!;
+    this.applyTrackVolumes();
+    a.currentTime = 0;
+    a.onended = () => {
+      if (!this.musicPlaying) return;
+      this.playTrackAt(this.trackIdx + 1);
+    };
+    void a.play().catch(() => {
+      /* autoplay may block until gesture — unlock() already ran */
+    });
+  }
+
+  startMusic(_seed = 0) {
+    if (!this.unlocked) this.unlock();
+    if (this.musicPlaying) return;
     this.stopMusic();
     this.musicPlaying = true;
+    this.ensureTracks();
+    this.usingFileMusic = this.trackEls.length > 0;
+    if (this.usingFileMusic) {
+      this.playTrackAt(0);
+      return;
+    }
+    // Fallback procedural bed if files missing
+    if (!this.ctx || !this.music) return;
     const ctx = this.ctx;
     const t0 = ctx.currentTime + 0.05;
-    // Silly chiptune loop: slimey arpeggio
     const notes = [130.81, 164.81, 196.0, 246.94, 261.63, 196.0, 164.81, 130.81];
     const beat = 0.22;
-    const loopBars = 8;
-    for (let bar = 0; bar < 64; bar++) {
+    for (let bar = 0; bar < 32; bar++) {
       for (let i = 0; i < notes.length; i++) {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.type = bar % 2 === 0 ? "triangle" : "square";
-        const freq = notes[(i + seed) % notes.length]! * (1 + (bar % 4) * 0.01);
+        const freq = notes[i % notes.length]! * (1 + (bar % 4) * 0.01);
         const start = t0 + bar * notes.length * beat + i * beat;
         o.frequency.value = freq;
         g.gain.setValueAtTime(0.0001, start);
@@ -348,7 +401,6 @@ export class GameAudio {
         o.stop(start + beat);
         this.musicNodes.push(o, g);
       }
-      if (bar >= loopBars * 4) break;
     }
   }
 
@@ -361,11 +413,21 @@ export class GameAudio {
       }
     }
     this.musicNodes = [];
+    for (const a of this.trackEls) {
+      a.onended = null;
+      try {
+        a.pause();
+        a.currentTime = 0;
+      } catch {
+        /* */
+      }
+    }
     this.musicPlaying = false;
   }
 
   dispose() {
     this.stopMusic();
+    this.trackEls = [];
     try {
       this.engineOsc?.stop();
     } catch {

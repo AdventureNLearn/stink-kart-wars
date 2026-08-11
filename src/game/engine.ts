@@ -642,7 +642,7 @@ export class KartEngine {
     }
   }
 
-  private openDialogue(key: string) {
+  openDialogue(key: string) {
     const beat = STORY_BEATS[key];
     if (!beat) return;
     this.dialogue = { speaker: beat.speaker, lines: beat.lines, i: 0 };

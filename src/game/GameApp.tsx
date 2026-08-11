@@ -241,7 +241,7 @@ export function GameApp() {
     phase === "dialogue" ||
     phase === "dead" ||
     phase === "paused";
-  const showTouch = phase === "playing";
+  const showTouch = phase === "playing" && !hud?.dialogue;
 
   return (
     <div className="game-root">

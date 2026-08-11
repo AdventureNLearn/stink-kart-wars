@@ -551,8 +551,9 @@
   justify-self: end;
 }
 .rpg-bottom.is-hidden {
-  visibility: hidden;
-  pointer-events: none;
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .minimap {
@@ -622,18 +623,25 @@
 
 /* Dim playfield chrome under dialogue so nothing collides */
 .game-overlay.dialogue-open .rpg-top {
-  opacity: 0.35;
+  opacity: 0.28;
   pointer-events: none;
 }
 .game-overlay.dialogue-open .rpg-center {
-  opacity: 0.2;
-}
-.game-overlay.dialogue-open .rpg-bottom.is-hidden {
-  visibility: hidden;
+  opacity: 0.15;
   pointer-events: none;
 }
+.game-overlay.dialogue-open .rpg-bottom,
+.game-overlay.dialogue-open .rpg-bottom.is-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
 .game-overlay.dialogue-open .announce {
-  display: none;
+  display: none !important;
+}
+/* Hide virtual controls while story dialogue owns the screen */
+.game-root:has(.dialogue-open) .touch-controls {
+  display: none !important;
 }
 
 .dlg-speaker {

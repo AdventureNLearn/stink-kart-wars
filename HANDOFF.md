@@ -135,8 +135,9 @@ Smoke helper: `node scripts/browser-smoke.mjs http://127.0.0.1:8080/ screenshots
 ## 9. Audio notes
 
 - SFX: procedural WebAudio in `audio.ts` (unlock on first gesture).
-- Music: `startMusic` / `stopMusic` on music gain bus.
-- Optional loops under `public/audio/` (e.g. `Slime_Carousel.mp3`, `Slime_Rider.mp3`) — wire via HTMLAudioElement or decoded AudioBuffer into `music` bus, `loop = true`.
+- **OST loop (wired):** `public/audio/Slime_Rider.mp3` → `Slime_Carousel.mp3` → repeat.
+  - Playlist in `gameAudio.startMusic()` via HTMLAudioElement; volumes follow Master/Music/Mute.
+  - Starts on "Enter the Wastes"; stops on title return.
 
 ---
 
