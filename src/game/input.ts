@@ -10,6 +10,8 @@ export class GameInput {
   keys = new Set<string>();
   bindings: ControlBindings = { ...DEFAULT_BINDINGS };
   touchSteer = 0;
+  /** Pending weapon slot select (1–6), consumed by engine each sample. */
+  weaponSelect: number | null = null;
   /** Legacy combined axis — prefer touchGas / touchBrake so skills never zero throttle. */
   touchThrottle = 0;
   /** Multitouch-safe: hold GAS without skills wiping drive. */
@@ -56,6 +58,15 @@ export class GameInput {
   attach(target: Window = window) {
     const onDown = (e: KeyboardEvent) => {
       this.keys.add(e.code);
+      // 1–6 weapon select
+      if (e.code.startsWith("Digit")) {
+        const n = Number(e.code.slice(5));
+        if (n >= 1 && n <= 6) this.weaponSelect = n;
+      }
+      if (e.code.startsWith("Numpad")) {
+        const n = Number(e.code.slice(6));
+        if (n >= 1 && n <= 6) this.weaponSelect = n;
+      }
       // prevent page scroll / browser shortcuts during play
       if (
         [
@@ -68,6 +79,12 @@ export class GameInput {
           "KeyA",
           "KeyS",
           "KeyD",
+          "Digit1",
+          "Digit2",
+          "Digit3",
+          "Digit4",
+          "Digit5",
+          "Digit6",
         ].includes(e.code)
       ) {
         e.preventDefault();
@@ -168,6 +185,9 @@ export class GameInput {
       pause: pauseHeld,
     };
 
+    const weaponSelect = this.weaponSelect;
+    this.weaponSelect = null;
+
     return {
       throttle,
       steer,
@@ -181,6 +201,7 @@ export class GameInput {
       lookBack: this.pressed("lookBack") || this.any("KeyB"),
       pause: this.edgePause,
       autoAccel: this.autoAccel,
+      weaponSelect,
       interact:
         this.edgeItem ||
         this.edgeSkill ||

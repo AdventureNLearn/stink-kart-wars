@@ -525,10 +525,34 @@
   bottom: 0.75rem;
   left: 0.6rem;
   right: 0.6rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: end;
   gap: 0.5rem;
+  pointer-events: none;
+  z-index: 12;
+}
+.rpg-bottom > * {
+  pointer-events: auto;
+}
+.hud-bottom-left {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+.hud-bottom-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  justify-self: center;
+}
+.rpg-bottom .weapon-strip {
+  justify-self: end;
+}
+.rpg-bottom.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .minimap {
@@ -580,16 +604,36 @@
 
 .dialogue-box {
   position: absolute;
-  bottom: 7.5rem;
   left: 50%;
-  transform: translateX(-50%);
-  width: min(560px, 92vw);
-  background: #0a1018f2;
-  border: 2px solid #3dcc5a66;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 90vw);
+  max-height: min(42vh, 280px);
+  overflow-y: auto;
+  background: #070c12f8;
+  border: 2px solid #3dcc5a88;
   border-radius: 14px;
   padding: 0.85rem 1rem;
   text-align: left;
-  box-shadow: 0 12px 40px #000a;
+  box-shadow: 0 16px 48px #000d;
+  z-index: 40;
+  pointer-events: auto;
+}
+
+/* Dim playfield chrome under dialogue so nothing collides */
+.game-overlay.dialogue-open .rpg-top {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.game-overlay.dialogue-open .rpg-center {
+  opacity: 0.2;
+}
+.game-overlay.dialogue-open .rpg-bottom.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+.game-overlay.dialogue-open .announce {
+  display: none;
 }
 
 .dlg-speaker {
@@ -667,7 +711,9 @@
   inset: 0;
   pointer-events: none;
   z-index: 20;
+  --touch-h: 8.5rem;
 }
+/* touch clearance handled in max-width 767 media */
 
 .touch-controls .zone {
   pointer-events: auto;
@@ -822,23 +868,179 @@
 }
 
 @media (max-width: 767px) {
+  .rpg-top {
+    left: 0.4rem;
+    right: 3rem;
+    gap: 0.35rem;
+  }
+  .rpg-bars {
+    min-width: 0;
+    width: min(150px, 42vw);
+    padding: 0.35rem 0.45rem;
+  }
+  .bar-row {
+    grid-template-columns: 28px 1fr auto;
+    font-size: 0.55rem;
+    margin-bottom: 0.12rem;
+  }
+  .quest-card {
+    max-width: min(148px, 40vw);
+    padding: 0.35rem 0.45rem;
+  }
+  .q-title { font-size: 0.72rem; }
+  .q-obj { display: none; }
+  .rpg-center {
+    top: calc(var(--grok-banner-h, 0px) + 4.6rem);
+    max-width: 70vw;
+  }
+  .loc-tag {
+    font-size: 0.58rem;
+    padding: 0.15rem 0.4rem;
+    background: #0a1018cc;
+    border-radius: 8px;
+    border: 1px solid #c45c2a55;
+  }
+  .boss-bar {
+    width: min(220px, 62vw);
+    padding: 0.25rem 0.4rem;
+    font-size: 0.55rem;
+  }
   .rpg-bottom {
-    bottom: 9.8rem;
+    bottom: calc(var(--touch-h, 8.5rem) + 0.35rem);
+    left: 0.35rem;
+    right: 0.35rem;
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+    gap: 0.35rem;
+  }
+  .hud-bottom-left {
+    order: 2;
+  }
+  .hud-bottom-mid {
+    order: 1;
+    flex-direction: row;
+    justify-content: center;
+  }
+  .rpg-bottom .weapon-strip {
+    order: 0;
+    justify-self: stretch;
+    max-width: none;
+    width: 100%;
   }
   .dialogue-box {
-    bottom: 11.2rem;
+    top: 38%;
+    width: min(340px, 92vw);
+    max-height: 34vh;
+    padding: 0.7rem 0.8rem;
   }
+  .dlg-text { font-size: 0.85rem; }
   .minimap {
-    width: 88px;
-    height: 88px;
+    width: 72px;
+    height: 72px;
   }
+  .speedo .num { font-size: 1.15rem; }
   .skill-hints {
     display: none;
   }
+  /* CAM mode stays with bottom mid — never top-center over quest */
   .cam-hud-pill {
-    position: absolute;
-    top: calc(var(--grok-banner-h, 0px) + 0.55rem);
-    left: 50%;
-    transform: translateX(-50%);
+    position: static;
+    transform: none;
+    min-width: 64px;
+    padding: 0.25rem 0.4rem;
   }
+  .cam-bar {
+    top: calc(var(--grok-banner-h, 0px) + 3.4rem);
+    right: 0.35rem;
+  }
+  .pause-fab {
+    top: calc(var(--grok-banner-h, 0px) + 0.4rem);
+    right: 0.35rem;
+  }
+}
+
+
+/* ── Weapon strip (1–6 / swipe) — sits in bottom HUD, never covers touch ── */
+.weapon-strip {
+  display: flex;
+  gap: 0.25rem;
+  background: #0a1018ee;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 0.28rem;
+  touch-action: pan-y;
+  user-select: none;
+  max-width: min(360px, 52vw);
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.weapon-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+  padding: 0.28rem 0.2rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8a9a8a;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.weapon-slot .ws-num {
+  font-size: 0.7rem;
+  color: #c4d0c4;
+}
+.weapon-slot .ws-name {
+  font-size: 0.52rem;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.weapon-slot.active {
+  background: #1a3a28;
+  border-color: #3dcc5a88;
+  color: #8dff9e;
+  box-shadow: 0 0 12px #3dcc5a33;
+}
+.weapon-slot.active .ws-num { color: #8dff9e; }
+.weapon-slot.cooling {
+  opacity: 0.55;
+}
+.safe-pill {
+  background: #0f2a1cee;
+  border: 1px solid #3dcc5a88;
+  color: #8dff9e;
+  border-radius: 10px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.loc-tag.safe {
+  color: #8dff9e;
+  border-color: #3dcc5a66;
+  background: #0f2a1cee;
+}
+.touch-btn.fire-btn {
+  background: linear-gradient(180deg, #2a5a38, #1a3020);
+  border-color: #3dcc5a99;
+  color: #c8ffd0;
+  font-weight: 900;
+  min-width: 64px;
+}
+.touch-btn.fire-btn.active {
+  background: #3dcc5a;
+  color: #0a1018;
+}
+
+@media (max-width: 720px) {
+  .weapon-slot .ws-name { font-size: 0.45rem; }
 }

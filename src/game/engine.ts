@@ -19,7 +19,13 @@ import {
   createShellMesh,
   createTankMesh,
 } from "./military";
-import { buildOpenWorld, type OpenWorld, type WorldObject } from "./openWorld";
+import {
+  buildOpenWorld,
+  SAFE_ZONES,
+  type OpenWorld,
+  type WorldObject,
+} from "./openWorld";
+import { WEAPONS, weaponBySlot, type WeaponDef } from "./weapons";
 import {
   resolveSphereAabbXZ,
   resolveSphereSphere,
@@ -51,7 +57,7 @@ type Projectile = {
   vy: number;
   vz: number;
   life: number;
-  kind: "stink" | "ooze" | "enemy_shot" | "shell" | "rocket";
+  kind: "stink" | "ooze" | "enemy_shot" | "shell" | "rocket" | "mine" | "bolt" | "blade";
   owner: "player" | "enemy";
   radius: number;
   damage: number;
@@ -134,6 +140,8 @@ export class KartEngine {
     invuln: 0,
     skillCd: 0,
     stinkCd: 0,
+    weaponCd: 0,
+    weaponSlot: 1,
     sprint: false,
     sprintMeter: 1,
     bank: 0,
@@ -422,58 +430,97 @@ export class KartEngine {
     this.enemies = [];
     this.boss = null;
 
-    // Kart raiders
-    for (const pack of [
-      { x: 45, z: 40, n: 4, kind: "slime_raider" as const },
-      { x: 120, z: 55, n: 4, kind: "slime_raider" as const },
-      { x: -90, z: 40, n: 3, kind: "bandit_kart" as const },
-      { x: 70, z: -70, n: 3, kind: "bandit_kart" as const },
-      { x: 190, z: -20, n: 3, kind: "korus_drone" as const },
-    ]) {
-      for (let i = 0; i < pack.n; i++) {
-        this.spawnEnemy(
-          pack.kind,
-          pack.x + (Math.random() - 0.5) * 28,
-          pack.z + (Math.random() - 0.5) * 28,
-        );
+    // Poisson-ish scatter: more units, minimum spacing, keep clear of safe zones
+    const placed: { x: number; z: number }[] = [];
+    const minDist = 32;
+    const isSafe = (x: number, z: number) =>
+      SAFE_ZONES.some((sz) => Math.hypot(x - sz.x, z - sz.z) < sz.radius + 14);
+    const tryPlace = (kind: EnemyKind, preferX: number, preferZ: number, jitter = 40) => {
+      for (let attempt = 0; attempt < 36; attempt++) {
+        const spread = jitter * (0.55 + (attempt / 36) * 1.6);
+        const ang = Math.random() * Math.PI * 2;
+        const rad = Math.random() * spread;
+        const x = preferX + Math.cos(ang) * rad;
+        const z = preferZ + Math.sin(ang) * rad;
+        if (Math.hypot(x, z) < 42) continue; // keep spawn clear
+        if (isSafe(x, z)) continue;
+        if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < minDist)) continue;
+        placed.push({ x, z });
+        this.spawnEnemy(kind, x, z);
+        return;
       }
+      // last resort: walk outward from prefer until spacing ok
+      for (let r = minDist; r < 120; r += 8) {
+        const ang = Math.random() * Math.PI * 2;
+        const x = preferX + Math.cos(ang) * r;
+        const z = preferZ + Math.sin(ang) * r;
+        if (Math.hypot(x, z) < 42 || isSafe(x, z)) continue;
+        if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < minDist * 0.85)) continue;
+        placed.push({ x, z });
+        this.spawnEnemy(kind, x, z);
+        return;
+      }
+    };
+
+    // Spread raider packs across map arcs (not tight clumps)
+    const raiderHubs: [number, number, EnemyKind, number][] = [
+      [55, 55, "slime_raider", 5],
+      [140, 70, "slime_raider", 4],
+      [-100, 30, "bandit_kart", 4],
+      [80, -90, "bandit_kart", 4],
+      [200, -40, "korus_drone", 5],
+      [-40, -90, "slime_raider", 3],
+      [160, 140, "bandit_kart", 3],
+      [-70, 100, "korus_drone", 3],
+      [30, 160, "slime_raider", 3],
+      [220, 80, "korus_drone", 3],
+    ];
+    for (const [hx, hz, kind, n] of raiderHubs) {
+      for (let i = 0; i < n; i++) tryPlace(kind, hx, hz, 55);
     }
 
-    // Tanks
-    for (const t of [
-      [60, 20, "reek"],
-      [100, 80, "reek"],
-      [150, 120, "reek"],
-      [40, -40, "reek"],
-      [-50, 80, "slime"],
-      [200, 100, "reek"],
-      [170, 150, "reek"],
-      [-30, -80, "reek"],
+    // Tanks — sparse ring, not stacked on hubs
+    const tankSpots: [number, number][] = [
+      [70, 10],
+      [115, 95],
+      [165, 130],
+      [35, -55],
+      [-65, 90],
+      [210, 95],
+      [175, 165],
+      [-45, -70],
+      [95, -30],
+      [-20, 130],
+      [240, 40],
+      [50, 200],
+    ];
+    for (const [x, z] of tankSpots) tryPlace("tank", x, z, 28);
+
+    // Artillery — long range posts on ridges
+    for (const [x, z] of [
+      [150, 25],
+      [175, 85],
+      [110, -15],
+      [-75, 15],
+      [195, 150],
+      [40, -110],
+      [-30, 160],
     ] as const) {
-      this.spawnEnemy("tank", t[0], t[1]);
+      tryPlace("artillery", x, z, 22);
     }
 
-    // Artillery
-    for (const a of [
-      [140, 30],
-      [160, 70],
-      [100, 0],
-      [-60, 20],
-      [180, 140],
+    // Emplaced crews near objectives but not clustered
+    for (const [x, z] of [
+      [55, 100],
+      [95, 40],
+      [15, -60],
+      [230, 155],
+      [155, 195],
+      [-90, 75],
+      [125, 120],
+      [-10, -140],
     ] as const) {
-      this.spawnEnemy("artillery", a[0], a[1]);
-    }
-
-    // Emplaced cannon crews
-    for (const c of [
-      [50, 90],
-      [80, 50],
-      [20, -50],
-      [220, 160],
-      [160, 190],
-      [-80, 70],
-    ] as const) {
-      this.spawnEnemy("cannon_crew", c[0], c[1]);
+      tryPlace("cannon_crew", x, z, 18);
     }
 
     this.boss = this.spawnEnemy("boss_reek", 190, 185, true);
@@ -558,6 +605,8 @@ export class KartEngine {
     this.player.kills = 0;
     this.player.maxHp = 120;
     this.player.maxStink = 100;
+    this.player.weaponSlot = 1;
+    this.player.weaponCd = 0;
     this.resetPlayer(0, 0);
     this.spawnArmy();
     this.openDialogue("intro");
@@ -799,12 +848,16 @@ export class KartEngine {
     if (this.player.invuln > 0) this.player.invuln -= dt;
     if (this.player.skillCd > 0) this.player.skillCd -= dt;
     if (this.player.stinkCd > 0) this.player.stinkCd -= dt;
+    if (this.player.weaponCd > 0) this.player.weaponCd -= dt;
+    const safe = this.activeSafeZone();
+    const regenMul = safe?.regenMul ?? 1;
     this.player.stink = Math.min(
       this.player.maxStink,
-      this.player.stink + 10 * dt,
+      this.player.stink + 10 * regenMul * dt,
     );
     if (this.player.hp > 0 && this.player.hp < this.player.maxHp) {
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 3 * dt);
+      const base = safe ? 12 * regenMul : 3;
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + base * dt);
     }
 
     this.updatePlayer(dt, input);
@@ -864,6 +917,10 @@ export class KartEngine {
   ) {
     const p = this.player;
     const throttle = input.throttle;
+
+    if (input.weaponSelect && input.weaponSelect >= 1 && input.weaponSelect <= 6) {
+      this.selectWeapon(input.weaponSelect);
+    }
 
     if (input.sprint && p.sprintMeter > 0.05) {
       p.sprint = true;
@@ -1053,19 +1110,12 @@ export class KartEngine {
       }
     }
 
-    if (input.stinkCloud && p.stinkCd <= 0 && p.stink >= 18) {
-      p.stinkCd = 0.75;
-      p.stink -= 18;
-      this.fireStink();
-      gameAudio.playStinkBomb();
-    }
-    if (input.skill && p.skillCd <= 0 && p.stink >= 30) {
-      p.skillCd = 4.5;
-      p.stink -= 30;
-      this.fireOoze();
-      gameAudio.playFart("big");
-      gameAudio.playBoost();
-      this.trauma = Math.min(1, this.trauma + 0.45);
+    // Weapon fire — X / touch FIRE / useItem. Q/E still fire spray/ooze shortcuts.
+    if (input.useItem || input.stinkCloud || input.skill) {
+      let slot = p.weaponSlot;
+      if (input.stinkCloud && !input.useItem) slot = 1;
+      if (input.skill && !input.useItem && !input.stinkCloud) slot = 2;
+      this.tryFireWeapon(slot);
     }
 
     for (const o of this.world.objects) {
@@ -1106,6 +1156,140 @@ export class KartEngine {
     this.playerMesh.scale.setScalar(1.4);
     this.playerMesh.visible =
       p.invuln <= 0 || Math.floor(p.invuln * 12) % 2 === 0;
+  }
+
+
+  private activeSafeZone() {
+    const p = this.player;
+    for (const sz of SAFE_ZONES) {
+      if (Math.hypot(p.x - sz.x, p.z - sz.z) < sz.radius) return sz;
+    }
+    return null;
+  }
+
+  selectWeapon(slot: number) {
+    const s = Math.max(1, Math.min(6, Math.round(slot)));
+    this.player.weaponSlot = s;
+    const w = weaponBySlot(s);
+    this.announce = `${s}: ${w.name}`;
+    this.announceTimer = 0.7;
+  }
+
+  cycleWeapon(dir: 1 | -1) {
+    const next = ((this.player.weaponSlot - 1 + dir + 6) % 6) + 1;
+    this.selectWeapon(next);
+  }
+
+  private tryFireWeapon(slot: number) {
+    const p = this.player;
+    const w = weaponBySlot(slot);
+    if (p.weaponCd > 0.02) return;
+    if (p.stink < w.cost) {
+      this.announce = "LOW STINK";
+      this.announceTimer = 0.55;
+      return;
+    }
+    p.weaponSlot = w.slot;
+    p.weaponCd = w.cd;
+    p.stink -= w.cost;
+    this.fireWeapon(w);
+  }
+
+  private fireWeapon(w: WeaponDef) {
+    const p = this.player;
+    const fx = -Math.sin(p.yaw);
+    const fz = -Math.cos(p.yaw);
+
+    if (w.projectile === "blade") {
+      gameAudio.playFart("big");
+      this.trauma = Math.min(1, this.trauma + 0.25);
+      this.particles.emit(p.x + fx * 2, p.y + 1.2, p.z + fz * 2, 16, {
+        color: w.color,
+        speed: 8,
+        life: 0.35,
+        vy: 2,
+      });
+      for (const e of this.enemies) {
+        if (!e.alive) continue;
+        if (Math.hypot(e.x - p.x, e.z - p.z) < (w.melee ?? 5.5)) {
+          this.damageEnemy(e, w.damage + p.level * 3);
+        }
+      }
+      return;
+    }
+
+    if (w.projectile === "mine") {
+      const mesh = createStinkCloudMesh();
+      mesh.scale.setScalar(0.7);
+      const x = p.x - fx * 2.5;
+      const z = p.z - fz * 2.5;
+      const y = this.world.groundY(x, z) + 0.6;
+      mesh.position.set(x, y, z);
+      this.scene.add(mesh);
+      this.projectiles.push({
+        mesh,
+        x,
+        y,
+        z,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        life: w.life,
+        kind: "mine",
+        owner: "player",
+        radius: w.radius,
+        damage: w.damage + p.level * 3,
+        splash: w.splash,
+      });
+      gameAudio.playStinkBomb();
+      return;
+    }
+
+    let mesh: THREE.Group;
+    if (w.projectile === "ooze") mesh = createOozeWaveMesh();
+    else if (w.projectile === "rocket") mesh = createShellMesh("rocket");
+    else if (w.projectile === "bolt") mesh = createShellMesh("shell");
+    else mesh = createStinkCloudMesh();
+
+    const speed = w.speed + Math.abs(p.speed) * 0.4;
+    const x = p.x + fx * 3.2;
+    const z = p.z + fz * 3.2;
+    const y = p.y + 1.1;
+    mesh.position.set(x, y, z);
+    this.scene.add(mesh);
+    const kind =
+      w.projectile === "rocket"
+        ? "rocket"
+        : w.projectile === "bolt"
+          ? "bolt"
+          : w.projectile === "ooze"
+            ? "ooze"
+            : "stink";
+    this.projectiles.push({
+      mesh,
+      x,
+      y,
+      z,
+      vx: fx * speed,
+      vy: w.projectile === "rocket" ? 2.5 : 0,
+      vz: fz * speed,
+      life: w.life,
+      kind,
+      owner: "player",
+      radius: w.radius,
+      damage: w.damage + p.level * 3,
+      splash: w.splash,
+    });
+    if (w.projectile === "stink") {
+      gameAudio.playStinkBomb();
+      this.particles.stinkPuff(x, y, z);
+    } else if (w.projectile === "ooze") {
+      gameAudio.playFart("big");
+      gameAudio.playBoost();
+      this.trauma = Math.min(1, this.trauma + 0.35);
+    } else {
+      gameAudio.playBoost();
+    }
   }
 
   private fireStink() {
@@ -1370,14 +1554,20 @@ export class KartEngine {
       pr.z += pr.vz * dt;
 
       const ground = this.world.groundY(pr.x, pr.z);
-      if (pr.y < ground + 0.4 && (pr.kind === "shell" || pr.kind === "rocket")) {
+      if (
+        pr.y < ground + 0.4 &&
+        (pr.kind === "shell" || pr.kind === "rocket" || pr.kind === "bolt")
+      ) {
         this.explode(pr.x, ground + 1, pr.z, pr.splash || 4, pr.damage, pr.owner);
         pr.life = 0;
       }
 
       pr.mesh.position.set(pr.x, pr.y, pr.z);
-      if (pr.kind === "shell" || pr.kind === "rocket") {
+      if (pr.kind === "shell" || pr.kind === "rocket" || pr.kind === "bolt") {
         pr.mesh.lookAt(pr.x + pr.vx, pr.y + pr.vy, pr.z + pr.vz);
+      }
+      if (pr.kind === "mine") {
+        pr.mesh.rotation.y += dt * 1.5;
       } else {
         pr.mesh.rotation.y += dt * 4;
       }
@@ -1779,11 +1969,23 @@ export class KartEngine {
       dialogueSpeaker: this.dialogue?.speaker ?? null,
       minimapHint: this.location,
       combo: this.player.combo,
-      bossHp: this.boss?.alive ? this.boss.hp : null,
-      bossMax: this.boss?.maxHp ?? null,
+      bossHp: (() => {
+        const b = this.boss;
+        if (!b?.alive) return null;
+        const near =
+          Math.hypot(b.x - this.player.x, b.z - this.player.z) < 95;
+        const hurt = b.hp < b.maxHp - 0.5;
+        return near || hurt ? b.hp : null;
+      })(),
+      bossMax: this.boss?.alive ? this.boss.maxHp : null,
       location: this.location,
       camMode: (CAM_MODES[this.camMode] ?? CAM_MODES[0]!).label,
       camZoom: this.camZoom,
+      weaponSlot: this.player.weaponSlot,
+      weaponName: weaponBySlot(this.player.weaponSlot).short,
+      weaponCd: this.player.weaponCd,
+      inSafe: !!this.activeSafeZone(),
+      safeName: this.activeSafeZone()?.name ?? null,
     });
   }
 
@@ -1841,6 +2043,9 @@ export class KartEngine {
       cycleCam: (dir: 1 | -1 = 1) => this.cycleCamMode(dir),
       adjustZoom: (d: number) => this.adjustCamZoom(d),
       stepSim: (s = 0.25) => this.stepSim(s),
+      selectWeapon: (slot: number) => this.selectWeapon(slot),
+      cycleWeapon: (dir: 1 | -1 = 1) => this.cycleWeapon(dir),
+      getWeapon: () => this.player.weaponSlot,
     };
   }
 }
@@ -1881,6 +2086,9 @@ declare global {
       cycleCam?: (dir?: 1 | -1) => void;
       adjustZoom?: (d: number) => void;
       stepSim?: (s?: number) => void;
+      selectWeapon?: (slot: number) => void;
+      cycleWeapon?: (dir?: 1 | -1) => void;
+      getWeapon?: () => number;
     };
   }
 }

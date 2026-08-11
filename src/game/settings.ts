@@ -69,7 +69,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   detail: "high",
   cameraShake: true,
   showFps: false,
-  autoAccel: true,
+  autoAccel: false,
   bindings: { ...DEFAULT_BINDINGS },
   worldId: "wastes",
 };

@@ -7,6 +7,7 @@ import {
   createCastleMesh,
   createTankMesh,
   createWatchtowerMesh,
+  createWreckTankMesh,
 } from "./military";
 
 export type WorldObjectKind =
@@ -84,6 +85,21 @@ export const FORT_PADS: {
   { x: -110, z: 55, coreR: 22, rimR: 36, floorY: 3.4 },
   // Ashen Ruins — south
   { x: -20, z: -120, coreR: 18, rimR: 30, floorY: 1.6 },
+];
+
+/** Friendly regen pockets — Stinky heals faster inside these. */
+export const SAFE_ZONES: {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  radius: number;
+  regenMul: number;
+}[] = [
+  { id: "spawn_safe", name: "No Man's Rest", x: 0, z: 0, radius: 28, regenMul: 3.2 },
+  { id: "beacon_safe", name: "Scrap Sanctum", x: 0, z: 95, radius: 22, regenMul: 2.6 },
+  { id: "bastion_safe", name: "Slime Refuge", x: -110, z: 55, radius: 20, regenMul: 2.4 },
+  { id: "ruins_safe", name: "Ashen Haven", x: -20, z: -120, radius: 18, regenMul: 2.2 },
 ];
 
 /** Rolling hills / valleys / mesa / canyon — no fort plateaus. */
@@ -185,7 +201,7 @@ export function addCastleFoundation(
   theme: "reek" | "slime" | "ruins",
 ) {
   const foot = footprintMinY(x, z, radius * 0.95);
-  const thickness = Math.max(2.4, topY - foot + 1.8);
+  const thickness = Math.max(3.2, topY - foot + 2.4);
   const color =
     theme === "slime" ? 0x2a4030 : theme === "ruins" ? 0x4a4038 : 0x3a3238;
   const geo = new THREE.CylinderGeometry(
@@ -198,11 +214,13 @@ export function addCastleFoundation(
     geo,
     new THREE.MeshStandardMaterial({
       color,
-      roughness: 0.92,
-      metalness: 0.06,
+      roughness: 0.96,
+      metalness: 0.04,
+      envMapIntensity: 0.18,
     }),
   );
-  mesh.position.set(x, topY - thickness * 0.5 + 0.15, z);
+  // Sit foundation slightly into the pad so walls never float
+  mesh.position.set(x, topY - thickness * 0.5 + 0.05, z);
   mesh.receiveShadow = true;
   mesh.castShadow = true;
   mesh.name = "CastleFoundation";
@@ -224,10 +242,16 @@ export function addCastleFoundation(
 function mat(color: number, opts: THREE.MeshStandardMaterialParameters = {}) {
   return new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.82,
-    metalness: 0.12,
+    roughness: 0.9,
+    metalness: 0.08,
+    envMapIntensity: 0.22,
     ...opts,
   });
+}
+
+/** Snap object base to terrain so meshes never float or bury. */
+function groundAt(x: number, z: number, lift = 0): number {
+  return terrainHeight(x, z) + lift;
 }
 
 export function buildOpenWorld(
@@ -242,7 +266,8 @@ export function buildOpenWorld(
   const density = detail === "high" ? 1 : detail === "medium" ? 0.7 : 0.45;
 
   // ── Smooth heightfield terrain ──
-  const grid = detail === "high" ? 140 : detail === "medium" ? 96 : 72;
+  // Higher sample density so structure feet match the mesh (less clipping)
+  const grid = detail === "high" ? 168 : detail === "medium" ? 112 : 80;
   const extent = 340;
   const pos: number[] = [];
   const col: number[] = [];
@@ -283,7 +308,7 @@ export function buildOpenWorld(
       metalness: 0.06,
       flatShading: false,
       // Layer 6: terrain responds to environment lighting
-      envMapIntensity: 0.35,
+      envMapIntensity: 0.2,
     }),
   );
   terrain.receiveShadow = true;
@@ -312,9 +337,10 @@ export function buildOpenWorld(
 
   // ── Roads (smooth asphalt strips) ──
   const roadMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2832,
-    roughness: 0.65,
-    metalness: 0.15,
+    color: 0x1a1820,
+    roughness: 0.82,
+    metalness: 0.08,
+    envMapIntensity: 0.18,
   });
   const roadEdge = new THREE.MeshStandardMaterial({
     color: 0xc4a035,
@@ -553,29 +579,29 @@ export function buildOpenWorld(
         tag: "fort_cannon",
       });
     }
-    // parked tanks
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + 0.4;
-      const px = cx + Math.cos(a) * 50;
-      const pz = cz + Math.sin(a) * 50;
-      const py = terrainHeight(px, pz);
-      const tank = createTankMesh("reek");
+    // Decommissioned husks around the fort (wreck look — not live enemies)
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.4;
+      const px = cx + Math.cos(a) * 52;
+      const pz = cz + Math.sin(a) * 52;
+      const py = groundAt(px, pz, 0);
+      const tank = createWreckTankMesh();
       tank.position.set(px, py, pz);
-      tank.rotation.y = a + Math.PI;
-      tank.scale.setScalar(1.1);
+      tank.rotation.y = a + Math.PI * 0.6;
+      tank.scale.setScalar(1.05);
       pushObj({
         kind: "tank_prop",
         x: px,
-        y: py + 1,
+        y: py + 0.6,
         z: pz,
         yaw: a,
-        hp: 140,
-        maxHp: 140,
+        hp: 50,
+        maxHp: 50,
         solid: true,
-        radius: 3.5,
-        aabb: aabbFromCenter(px, py + 1, pz, 2.5, 1.5, 3.5),
+        radius: 3.2,
+        aabb: aabbFromCenter(px, py + 0.6, pz, 2.3, 1.0, 3.0),
         mesh: tank,
-        tag: "prop_tank",
+        tag: "wreck",
       });
     }
   }
@@ -764,8 +790,48 @@ export function buildOpenWorld(
     }
   }
 
+  // ── Safe zones (regen pockets) ──
+  for (const sz of SAFE_ZONES) {
+    landmarks.push({
+      id: sz.id,
+      name: sz.name,
+      x: sz.x,
+      z: sz.z,
+      radius: sz.radius,
+    });
+    const y = terrainHeight(sz.x, sz.z) + 0.12;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(sz.radius * 0.72, sz.radius * 0.95, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x3dcc5a,
+        transparent: true,
+        opacity: 0.28,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(sz.x, y, sz.z);
+    group.add(ring);
+    const pad = new THREE.Mesh(
+      new THREE.CircleGeometry(sz.radius * 0.7, 40),
+      new THREE.MeshStandardMaterial({
+        color: 0x1a3a28,
+        roughness: 0.95,
+        metalness: 0.05,
+        transparent: true,
+        opacity: 0.55,
+        envMapIntensity: 0.15,
+      }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(sz.x, y - 0.02, sz.z);
+    pad.receiveShadow = true;
+    group.add(pad);
+  }
+
   // ── Battlefield debris (smooth boulders, wrecks — not Lego blocks) ──
-  const propN = Math.floor(160 * density);
+  const propN = Math.floor(95 * density);
   for (let i = 0; i < propN; i++) {
     const ang = Math.random() * Math.PI * 2;
     const rad = 30 + Math.random() * 290;
@@ -782,7 +848,7 @@ export function buildOpenWorld(
       const s = 1.5 + Math.random() * 3.5;
       const rock = new THREE.Mesh(
         new THREE.SphereGeometry(s, 10, 8),
-        mat(0x6a4a38, { roughness: 0.95 }),
+        mat(0x4a3428, { roughness: 0.97 }),
       );
       rock.scale.set(1, 0.55 + Math.random() * 0.35, 1.1);
       rock.position.set(x, y + s * 0.35, z);
@@ -806,7 +872,7 @@ export function buildOpenWorld(
       const h = 5 + Math.random() * 7;
       const tree = new THREE.Mesh(
         new THREE.CylinderGeometry(0.25, 0.55, h, 8),
-        mat(0x3a2a20),
+        mat(0x2a1e16, { roughness: 0.95 }),
       );
       tree.position.set(x, y + h * 0.5, z);
       tree.rotation.z = (Math.random() - 0.5) * 0.3;
@@ -869,34 +935,37 @@ export function buildOpenWorld(
         mesh: bar,
       });
     } else if (roll < 0.72) {
-      // wrecked tank husk
-      const tank = createTankMesh(Math.random() > 0.5 ? "reek" : "slime");
-      tank.position.set(x, y, z);
+      // dead wreck husk — distinct silhouette, never mistaken for live tank
+      const tank = createWreckTankMesh();
+      const gy = groundAt(x, z, 0);
+      tank.position.set(x, gy, z);
       tank.rotation.y = Math.random() * Math.PI * 2;
-      tank.rotation.z = (Math.random() - 0.5) * 0.4;
-      tank.scale.setScalar(0.85);
+      tank.rotation.z = (Math.random() - 0.5) * 0.15;
+      tank.scale.setScalar(0.9 + Math.random() * 0.15);
       pushObj({
         kind: "tank_prop",
         x,
-        y: y + 1,
+        y: gy + 0.6,
         z,
-        yaw: 0,
-        hp: 80,
-        maxHp: 80,
+        yaw: tank.rotation.y,
+        hp: 45,
+        maxHp: 45,
         solid: true,
-        radius: 3,
-        aabb: aabbFromCenter(x, y + 1, z, 2.2, 1.2, 3),
+        radius: 2.8,
+        aabb: aabbFromCenter(x, gy + 0.6, z, 2.0, 0.9, 2.6),
         mesh: tank,
+        tag: "wreck",
       });
     } else if (roll < 0.8) {
       // field cannon
       const cannon = createCannonMesh("field");
-      cannon.position.set(x, y, z);
+      const cy = groundAt(x, z, 0);
+      cannon.position.set(x, cy, z);
       cannon.rotation.y = Math.random() * Math.PI * 2;
       pushObj({
         kind: "cannon",
         x,
-        y: y + 1,
+        y: cy + 0.9,
         z,
         yaw: 0,
         hp: 55,

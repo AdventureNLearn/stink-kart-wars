@@ -11,6 +11,7 @@ import {
   type GameSettings,
 } from "./settings";
 import { gameAudio } from "./audio";
+import { WEAPONS } from "./weapons";
 
 const BIND_ACTIONS: ControlAction[] = [
   "throttle",
@@ -246,8 +247,10 @@ export function GameApp() {
     <div className="game-root">
       <canvas ref={canvasRef} className="game-canvas" />
 
-      <div className="game-overlay">
-        {/* In-world HUD */}
+      <div
+        className={`game-overlay${hud?.dialogue ? " dialogue-open" : ""}${showTouch ? " touch-mode" : ""}`}
+      >
+        {/* In-world HUD — zoned so nothing covers play-critical chrome */}
         {inWorld && hud && (
           <>
             <div className="rpg-top">
@@ -294,13 +297,17 @@ export function GameApp() {
               <div className="quest-card">
                 <p className="q-label">QUEST</p>
                 <p className="q-title">{hud.questTitle}</p>
-                <p className="q-obj">{hud.questObjective}</p>
+                {!hud.dialogue && (
+                  <p className="q-obj">{hud.questObjective}</p>
+                )}
                 <p className="q-prog">{hud.questProgress}</p>
               </div>
             </div>
 
             <div className="rpg-center">
-              <div className="loc-tag">{hud.location}</div>
+              <div className={`loc-tag ${hud.inSafe ? "safe" : ""}`}>
+                {hud.inSafe ? `SAFE · ${hud.location}` : hud.location}
+              </div>
               {hud.combo > 1 && (
                 <div className="combo">COMBO x{hud.combo}</div>
               )}
@@ -330,33 +337,68 @@ export function GameApp() {
               </div>
             )}
 
-            <div className="rpg-bottom">
-              <div className="minimap">
-                <canvas ref={minimapRef} width={120} height={120} />
+            {/* Play chrome — hidden under dialogue so text never collides */}
+            <div className={`rpg-bottom${hud.dialogue ? " is-hidden" : ""}`}>
+              <div className="hud-bottom-left">
+                <div className="minimap">
+                  <canvas ref={minimapRef} width={120} height={120} />
+                </div>
+                <div className="hud-pill speedo">
+                  <p className="num">
+                    {Math.round(Math.abs(hud.speed) * 2.8)}
+                    {hud.speed < -0.5 ? " R" : ""}
+                  </p>
+                  <p className="unit">KM/H · {hud.kills} kills</p>
+                </div>
               </div>
-              <div className="hud-pill speedo">
-                <p className="num">
-                  {Math.round(Math.abs(hud.speed) * 2.8)}
-                  {hud.speed < -0.5 ? " R" : ""}
-                </p>
-                <p className="unit">KM/H · {hud.kills} kills</p>
+              <div className="hud-bottom-mid">
+                <div className="cam-hud-pill">
+                  <span className="cam-mode-label">{hud.camMode}</span>
+                  <span className="cam-zoom-label">
+                    {Math.round(hud.camZoom * 100)}%
+                  </span>
+                </div>
+                {hud.inSafe && (
+                  <div className="safe-pill" title="Safe zone regen">
+                    🛡 {hud.safeName ?? "SAFE"}
+                  </div>
+                )}
               </div>
-              <div className="cam-hud-pill">
-                <span className="cam-mode-label">{hud.camMode}</span>
-                <span className="cam-zoom-label">
-                  {Math.round(hud.camZoom * 100)}%
-                </span>
-              </div>
-              <div className="skill-hints">
-                <span>
-                  <kbd>Q</kbd> Stink Cloud
-                </span>
-                <span>
-                  <kbd>E</kbd> Ooze Overdrive
-                </span>
-                <span>
-                  <kbd>R</kbd> Sprint
-                </span>
+              <div
+                className="weapon-strip"
+                onPointerDown={(e) => {
+                  const el = e.currentTarget;
+                  el.setPointerCapture(e.pointerId);
+                  const startX = e.clientX;
+                  const startSlot = hud.weaponSlot;
+                  const move = (ev: PointerEvent) => {
+                    const dx = ev.clientX - startX;
+                    if (Math.abs(dx) > 36) {
+                      const steps = Math.trunc(dx / 36);
+                      const next = ((startSlot - 1 - steps + 600) % 6) + 1;
+                      engineRef.current?.selectWeapon(next);
+                    }
+                  };
+                  const up = () => {
+                    window.removeEventListener("pointermove", move);
+                    window.removeEventListener("pointerup", up);
+                  };
+                  window.addEventListener("pointermove", move);
+                  window.addEventListener("pointerup", up);
+                }}
+              >
+                {WEAPONS.map((w) => (
+                  <button
+                    key={w.slot}
+                    type="button"
+                    className={`weapon-slot ${hud.weaponSlot === w.slot ? "active" : ""} ${hud.weaponCd > 0.05 && hud.weaponSlot === w.slot ? "cooling" : ""}`}
+                    onClick={() => engineRef.current?.selectWeapon(w.slot)}
+                    title={`${w.slot}: ${w.name}`}
+                  >
+                    <span className="ws-num">{w.slot}</span>
+                    <span className="ws-name">{w.short}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -402,9 +444,9 @@ export function GameApp() {
               </a>
             </p>
             <p className="start-sub">
-              Full-scale ZeroVerse warfare. Smooth battlefields, epic castles, tanks,
-              cannons, artillery — and Stinky's bandana never comes off. Jump + stomp
-              raiders. Q stink · E ooze · R sprint · Space hop.
+              Full-scale ZeroVerse warfare. Six weapons (keys 1–6 / swipe). Hold gas to
+              drive — karts stay still until you throttle. Safe zones regen fast. Jump +
+              stomp raiders. X fire · R sprint · Space hop.
             </p>
 
             <div className="menu-tabs">
@@ -451,7 +493,7 @@ export function GameApp() {
                   </div>
                   <div className="feature-card">
                     <strong>Controls</strong>
-                    <span>WASD drive · Q stink · E ooze · R sprint</span>
+                    <span>WASD drive · 1–6 weapons · X fire · R sprint</span>
                   </div>
                 </div>
                 <p className="start-sub" style={{ marginTop: "0.25rem" }}>
@@ -547,7 +589,7 @@ export function GameApp() {
                   />
                 </label>
                 <label className="setting-row check">
-                  <span>Auto-Accelerate</span>
+                  <span>Auto-Roll (optional)</span>
                   <input
                     type="checkbox"
                     checked={settings.autoAccel}
@@ -663,28 +705,14 @@ export function GameApp() {
             <div className="stick-knob" />
           </div>
 
-          {/* Center: action cluster (skills + jump) */}
+          {/* Center: FIRE + JUMP + DRIFT + SPRINT (weapon strip swipe above) */}
           <div className="zone btn-cluster">
             <button
               type="button"
-              className={`touch-btn drift ${activeBtns.drift ? "active" : ""}`}
-              {...bindHold("drift")}
+              className={`touch-btn fire-btn ${activeBtns.item ? "active" : ""}`}
+              {...bindHold("item")}
             >
-              DRIFT
-            </button>
-            <button
-              type="button"
-              className={`touch-btn stink ${activeBtns.stink ? "active" : ""}`}
-              {...bindHold("stink")}
-            >
-              STINK
-            </button>
-            <button
-              type="button"
-              className={`touch-btn skill ${activeBtns.skill ? "active" : ""}`}
-              {...bindHold("skill")}
-            >
-              OOZE
+              FIRE
             </button>
             <button
               type="button"
@@ -692,6 +720,13 @@ export function GameApp() {
               {...bindHold("jump")}
             >
               JUMP
+            </button>
+            <button
+              type="button"
+              className={`touch-btn drift ${activeBtns.drift ? "active" : ""}`}
+              {...bindHold("drift")}
+            >
+              DRIFT
             </button>
             <button
               type="button"

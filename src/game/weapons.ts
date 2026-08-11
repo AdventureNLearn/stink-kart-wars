@@ -1,0 +1,129 @@
+/** Six selectable weapons for Stinky — keyboard 1–6 / mobile swipe. */
+
+export type WeaponId =
+  | "stink_spray"
+  | "ooze_blob"
+  | "slime_rocket"
+  | "gas_mine"
+  | "quantum_bolt"
+  | "bandana_blade";
+
+export type WeaponDef = {
+  id: WeaponId;
+  /** Slot 1–6 */
+  slot: number;
+  name: string;
+  short: string;
+  /** Stink meter cost per shot */
+  cost: number;
+  /** Cooldown seconds */
+  cd: number;
+  color: number;
+  /** Projectile kind tag used by engine */
+  projectile: "stink" | "ooze" | "rocket" | "mine" | "bolt" | "blade";
+  speed: number;
+  life: number;
+  radius: number;
+  damage: number;
+  splash: number;
+  /** Melee range for blade */
+  melee?: number;
+};
+
+export const WEAPONS: WeaponDef[] = [
+  {
+    id: "stink_spray",
+    slot: 1,
+    name: "Stink Spray",
+    short: "SPRAY",
+    cost: 10,
+    cd: 0.28,
+    color: 0x3dcc5a,
+    projectile: "stink",
+    speed: 52,
+    life: 1.4,
+    radius: 2.2,
+    damage: 22,
+    splash: 0,
+  },
+  {
+    id: "ooze_blob",
+    slot: 2,
+    name: "Ooze Blob",
+    short: "OOZE",
+    cost: 22,
+    cd: 0.85,
+    color: 0x8dff9e,
+    projectile: "ooze",
+    speed: 38,
+    life: 1.8,
+    radius: 3.2,
+    damage: 48,
+    splash: 5,
+  },
+  {
+    id: "slime_rocket",
+    slot: 3,
+    name: "Slime Rocket",
+    short: "RKT",
+    cost: 28,
+    cd: 1.15,
+    color: 0xff6622,
+    projectile: "rocket",
+    speed: 62,
+    life: 2.4,
+    radius: 1.8,
+    damage: 70,
+    splash: 8,
+  },
+  {
+    id: "gas_mine",
+    slot: 4,
+    name: "Gas Mine",
+    short: "MINE",
+    cost: 18,
+    cd: 1.4,
+    color: 0xc4a035,
+    projectile: "mine",
+    speed: 0,
+    life: 12,
+    radius: 3.5,
+    damage: 55,
+    splash: 7,
+  },
+  {
+    id: "quantum_bolt",
+    slot: 5,
+    name: "Quantum Bolt",
+    short: "Q-BOLT",
+    cost: 16,
+    cd: 0.45,
+    color: 0x22d3ee,
+    projectile: "bolt",
+    speed: 90,
+    life: 1.1,
+    radius: 1.2,
+    damage: 40,
+    splash: 2,
+  },
+  {
+    id: "bandana_blade",
+    slot: 6,
+    name: "Bandana Blade",
+    short: "BLADE",
+    cost: 12,
+    cd: 0.55,
+    color: 0xe11d2e,
+    projectile: "blade",
+    speed: 0,
+    life: 0.25,
+    radius: 4.5,
+    damage: 65,
+    splash: 4.5,
+    melee: 5.5,
+  },
+];
+
+export function weaponBySlot(slot: number): WeaponDef {
+  return WEAPONS[(slot - 1 + 6) % 6]!;
+}

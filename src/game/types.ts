@@ -15,6 +15,8 @@ export interface InputState {
   pause?: boolean;
   interact?: boolean;
   autoAccel?: boolean;
+  /** 1–6 weapon select edge */
+  weaponSelect?: number | null;
 }
 
 export type EnemyKind =
@@ -72,6 +74,11 @@ export interface HudSnapshot {
   location: string;
   camMode: string;
   camZoom: number;
+  weaponSlot: number;
+  weaponName: string;
+  weaponCd: number;
+  inSafe: boolean;
+  safeName: string | null;
 }
 
 export const COLORS = {

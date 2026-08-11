@@ -16,7 +16,7 @@ const rust = () =>
     roughness: 0.62,
     clearcoat: 0.1,
     clearcoatRoughness: 0.7,
-    envMapIntensity: 0.7,
+    envMapIntensity: 0.35,
   });
 
 const slimePaint = () =>
@@ -45,7 +45,7 @@ const glow = (c: number) =>
     metalness: 0.35,
     roughness: 0.25,
     clearcoat: 0.5,
-    envMapIntensity: 1.0,
+    envMapIntensity: 0.45,
   });
 
 /** Main battle tank — Layer 4 materials / contact / micro-detail. Silhouette frozen. */
@@ -165,6 +165,96 @@ export function createTankMesh(
   const ex = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.8), rust());
   ex.position.set(1.0, 1.3, 2.2);
   root.add(ex);
+
+  return root;
+}
+
+/** Clearly dead husk — rusted, half-buried, no faction glow. Never looks live. */
+export function createWreckTankMesh(): THREE.Group {
+  const root = new THREE.Group();
+  root.name = "WreckTank";
+  const husk = new THREE.MeshPhysicalMaterial({
+    color: 0x3a2a22,
+    metalness: 0.55,
+    roughness: 0.88,
+    clearcoat: 0.05,
+    envMapIntensity: 0.25,
+  });
+  const ash = new THREE.MeshPhysicalMaterial({
+    color: 0x2a2220,
+    metalness: 0.2,
+    roughness: 0.95,
+    envMapIntensity: 0.15,
+  });
+  const rustMat = rust();
+
+  root.add(contactShadow(4.4, 5.8, 0.5));
+
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.95, 4.6), husk);
+  hull.position.set(0, 0.55, 0);
+  hull.rotation.z = 0.18;
+  hull.rotation.x = -0.08;
+  hull.castShadow = true;
+  hull.receiveShadow = true;
+  root.add(hull);
+
+  // Broken turret (askew, barrel snapped)
+  const turret = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.9, 1.1, 0.7, 10),
+    ash,
+  );
+  turret.position.set(0.35, 1.15, 0.2);
+  turret.rotation.z = 0.55;
+  turret.rotation.y = 0.8;
+  turret.castShadow = true;
+  root.add(turret);
+
+  const stub = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.14, 0.2, 1.2, 8),
+    rustMat,
+  );
+  stub.rotation.x = Math.PI / 2 + 0.4;
+  stub.position.set(0.5, 1.25, -1.1);
+  root.add(stub);
+
+  // Collapsed track
+  const track = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.5, 4.2), ash);
+  track.position.set(-1.55, 0.25, 0.1);
+  track.rotation.z = 0.35;
+  root.add(track);
+  const track2 = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 3.6), ash);
+  track2.position.set(1.6, 0.18, -0.2);
+  track2.rotation.z = -0.25;
+  root.add(track2);
+
+  // Scorch / debris piles so silhouette ≠ live tank
+  for (const [x, z, s] of [
+    [1.8, 1.6, 0.7],
+    [-1.4, -1.8, 0.55],
+    [0.2, 2.4, 0.45],
+  ] as const) {
+    const pile = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(s, 0),
+      rustMat,
+    );
+    pile.position.set(x, s * 0.35, z);
+    pile.scale.set(1.2, 0.55, 1);
+    root.add(pile);
+  }
+
+  // Black soot plume marker (static) — readable as dead at range
+  const soot = new THREE.Mesh(
+    new THREE.ConeGeometry(0.45, 1.8, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0x1a1412,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+    }),
+  );
+  soot.position.set(0.2, 2.4, 0.1);
+  soot.rotation.z = 0.15;
+  root.add(soot);
 
   return root;
 }
@@ -325,26 +415,27 @@ export function createCastleMesh(
   root.scale.setScalar(scale);
 
   const wallMat = new THREE.MeshPhysicalMaterial({
-    color: theme === "slime" ? 0x3a5a40 : theme === "ruins" ? 0x6a5a50 : 0x4a3a42,
-    roughness: 0.82,
-    metalness: 0.12,
-    clearcoat: 0.08,
-    clearcoatRoughness: 0.85,
-    envMapIntensity: 0.45,
+    color: theme === "slime" ? 0x243828 : theme === "ruins" ? 0x3a322c : 0x2e242a,
+    roughness: 0.92,
+    metalness: 0.08,
+    clearcoat: 0.05,
+    clearcoatRoughness: 0.9,
+    envMapIntensity: 0.22,
   });
   const roofMat = new THREE.MeshPhysicalMaterial({
-    color: theme === "slime" ? 0x1f8a35 : 0x6b1525,
-    roughness: 0.65,
-    metalness: 0.12,
-    emissive: theme === "slime" ? 0x0a3010 : 0x2a0810,
-    emissiveIntensity: 0.22,
-    clearcoat: 0.2,
+    color: theme === "slime" ? 0x145a28 : 0x4a1018,
+    roughness: 0.78,
+    metalness: 0.1,
+    emissive: theme === "slime" ? 0x062010 : 0x1a060c,
+    emissiveIntensity: 0.12,
+    clearcoat: 0.12,
+    envMapIntensity: 0.25,
   });
   const stoneMat = new THREE.MeshPhysicalMaterial({
-    color: 0x5a524c,
-    roughness: 0.88,
-    metalness: 0.06,
-    envMapIntensity: 0.4,
+    color: 0x3a3530,
+    roughness: 0.94,
+    metalness: 0.05,
+    envMapIntensity: 0.2,
   });
 
   const wallH = 10;
