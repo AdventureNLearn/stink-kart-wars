@@ -821,40 +821,76 @@ export function buildOpenWorld(
   for (let i = 0; i < 3; i++) {
     const gx = 120 + i * 16;
     const gz = 45 + (i % 2) * 12;
-    const y = terrainHeight(gx, gz) + 2.5;
-    const core = new THREE.Mesh(
-      new THREE.OctahedronGeometry(2.4, 1),
-      mat(0xa855f7, { emissive: 0xa855f7, emissiveIntensity: 0.95 }),
-    );
-    core.position.set(gx, y, gz);
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.8, 3.2, 2.2, 10),
-      mat(0x2a2035, { metalness: 0.4 }),
-    );
-    base.position.set(gx, terrainHeight(gx, gz) + 1.1, gz);
+    const ground = groundAt(gx, gz, 0);
+    const y = ground + 2.8;
+    // Self-contained local mesh (origin at ground) — beam + core always co-located
     const g = new THREE.Group();
+    g.name = "OutpostGenerator";
+    g.position.set(gx, ground, gz);
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.0, 3.6, 2.4, 12),
+      mat(0x2a1038, { metalness: 0.45, roughness: 0.55, emissive: 0x3a1060, emissiveIntensity: 0.35 }),
+    );
+    base.position.y = 1.2;
+    base.castShadow = true;
+    base.receiveShadow = true;
     g.add(base);
+
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(2.6, 1),
+      mat(0xd946ef, {
+        emissive: 0xd946ef,
+        emissiveIntensity: 1.35,
+        metalness: 0.25,
+        roughness: 0.3,
+      }),
+    );
+    core.position.y = 3.4;
+    core.castShadow = true;
+    core.name = "generatorCore";
     g.add(core);
-    // Purple sky beam at generator world position
-    const beamRoot = new THREE.Group();
-    beamRoot.position.set(gx, terrainHeight(gx, gz), gz);
-    addSkyBeam(beamRoot, 0xa855f7, 48);
-    g.add(beamRoot);
-    // emplaced artillery nearby
-    const art = createArtilleryMesh();
-    art.position.set(gx + 8, terrainHeight(gx + 8, gz + 4), gz + 4);
-    g.add(art);
+
+    // Hot ring under core
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(2.4, 0.18, 8, 24),
+      mat(0xf0abfc, { emissive: 0xe879f9, emissiveIntensity: 1.2 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 2.0;
+    ring.name = "generatorRing";
+    g.add(ring);
+
+    // Tall magenta sky beam — unmissable for Torch the Outpost
+    addSkyBeam(g, 0xe879f9, 72);
+
+    // Extra bright secondary core shaft
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.9, 70, 10, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xfae8ff,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    );
+    shaft.position.y = 36;
+    shaft.name = "skyBeamCore";
+    g.add(shaft);
+
     pushObj({
       kind: "generator",
       x: gx,
-      y,
+      y: y,
       z: gz,
       yaw: 0,
       hp: 90,
       maxHp: 90,
       solid: true,
-      radius: 3.4,
-      aabb: aabbFromCenter(gx, y, gz, 2.8, 3, 2.8),
+      radius: 3.8,
+      aabb: aabbFromCenter(gx, y, gz, 3.2, 3.5, 3.2),
       mesh: g,
       tag: "generator",
     });

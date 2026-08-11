@@ -712,7 +712,9 @@ export class KartEngine {
           }
           const cost = performance.now() - t0;
           if (cost > 40) this.renderDebt = this.softwareGL ? 3 : 1;
-          if (!this.softwareGL) this.drawMinimap();
+          // Always paint minimap (2D) — softwareGL was hiding generator blips
+          this.drawMinimap();
+
         }
 
         this.lastHud += dt;
@@ -888,6 +890,13 @@ export class KartEngine {
         o.kind === "generator"
       ) {
         o.mesh.rotation.y += dt * 1.1;
+        // Spin generator core harder so purple cores read as active targets
+        if (o.kind === "generator") {
+          const core = o.mesh.getObjectByName("generatorCore");
+          if (core) core.rotation.y += dt * 2.4;
+          const ring = o.mesh.getObjectByName("generatorRing");
+          if (ring) ring.rotation.z += dt * 1.6;
+        }
       }
       // Scrap caches: re-ground every frame + bob/spin so they never clip or vanish
       if (o.kind === "scrap") {
@@ -1926,6 +1935,14 @@ export class KartEngine {
       if (o.tag === "generator") {
         this.generatorsDown++;
         this.bumpQuest("slime_outpost");
+        const left = this.world.objects.filter(
+          (x) => x.alive && x.tag === "generator",
+        ).length;
+        this.announce =
+          left > 0
+            ? `GENERATOR DOWN! ${left} left — follow magenta beams`
+            : "OUTPOST GENERATORS TORCHED!";
+        this.announceTimer = 2.0;
       }
       if (o.tag === "korus_core") {
         this.bumpQuest("korus_core");
@@ -2104,21 +2121,38 @@ export class KartEngine {
     const h = c.height;
     ctx.fillStyle = "#0a1018";
     ctx.fillRect(0, 0, w, h);
-    const scale = 0.24;
+    // Zoomed out so outpost generators stay readable
+    const scale = 0.2;
     const cx = w / 2;
     const cy = h / 2;
+    const pad = 8;
+    const clampEdge = (px: number, py: number) => {
+      const out = px < pad || px > w - pad || py < pad || py > h - pad;
+      return {
+        x: THREE.MathUtils.clamp(px, pad, w - pad),
+        y: THREE.MathUtils.clamp(py, pad, h - pad),
+        out,
+      };
+    };
     const tx = (x: number) => cx + (x - this.player.x) * scale;
     const ty = (z: number) => cy + (z - this.player.z) * scale;
 
     for (const lm of this.world.landmarks) {
-      ctx.fillStyle = lm.id === "throne" ? "#ff224488" : "#22d3ee88";
+      const p = clampEdge(tx(lm.x), ty(lm.z));
+      ctx.fillStyle =
+        lm.id === "throne"
+          ? "#ff224488"
+          : lm.id === "outpost"
+            ? "#e879f988"
+            : "#22d3ee88";
       ctx.beginPath();
-      ctx.arc(tx(lm.x), ty(lm.z), 5, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, lm.id === "outpost" ? 6 : 5, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Quest objectives on minimap when in range (or during the matching quest)
+
+    // Quest objectives — edge-clamped so far targets still show as chevrons
     const q = this.activeQuest();
-    const MAP_RANGE = 155; // world units — reasonable scout range
+    const MAP_RANGE = 220;
     const pulse = 0.55 + Math.sin(performance.now() * 0.008) * 0.45;
     for (const o of this.world.objects) {
       if (!o.alive) continue;
@@ -2134,39 +2168,57 @@ export class KartEngine {
           radius = scrapQuest ? 5 : 4;
         }
       } else if (o.tag === "generator") {
+        // Always on-map during Torch the Outpost
         if (q?.id === "slime_outpost" || inRange) {
-          color = "#c084fc";
-          radius = 4;
+          color = "#e879f9";
+          radius = q?.id === "slime_outpost" ? 6 : 4;
         }
       } else if (o.tag === "korus_core") {
         if (q?.id === "korus_core" || inRange) {
           color = "#22d3ee";
           radius = 5;
         }
-      } else if (o.tag === "quest_beacon" && (q?.id === "wake_up" || inRange)) {
+      } else if (
+        o.tag === "quest_beacon" &&
+        (q?.id === "wake_up" || inRange)
+      ) {
         color = "#3dcc5a";
         radius = 4;
       }
       if (!color) continue;
 
-      const px = tx(o.x);
-      const pz = ty(o.z);
-      // Outer pulse ring
+      const p = clampEdge(tx(o.x), ty(o.z));
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.35 + pulse * 0.4;
-      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.4 + pulse * 0.5;
+      ctx.lineWidth = p.out ? 3 : 2;
       ctx.beginPath();
-      ctx.arc(px, pz, radius + 3 + pulse * 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, radius + 3 + pulse * 2, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(px, pz, radius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
       ctx.fill();
+      if (p.out) {
+        const ang = Math.atan2(ty(o.z) - cy, tx(o.x) - cx);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(ang);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(7, 0);
+        ctx.lineTo(-4, 5);
+        ctx.lineTo(-4, -5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
     }
-    // legacy scrap-only block removed — covered above
+
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      const p = clampEdge(tx(e.x), ty(e.z));
+      if (p.out && !e.isBoss) continue;
       ctx.fillStyle = e.isBoss
         ? "#ff2244"
         : e.kind === "tank"
@@ -2174,7 +2226,7 @@ export class KartEngine {
           : e.kind === "artillery"
             ? "#ffaa00"
             : "#e11d2e";
-      ctx.fillRect(tx(e.x) - 2, ty(e.z) - 2, 4, 4);
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
     }
     ctx.fillStyle = "#3dcc5a";
     ctx.beginPath();
@@ -2209,11 +2261,29 @@ export class KartEngine {
       kills: this.player.kills,
       questTitle: def?.title ?? "All quests complete",
       questObjective: def?.objective ?? "Dominate the ZeroVerse battlefield.",
-      questProgress: q
-        ? q.id === "get_wheels"
-          ? `${q.progress}/${q.target} · gold crates on map`
-          : `${q.progress}/${q.target}`
-        : "—",
+      questProgress: (() => {
+        if (!q) return "—";
+        if (q.id === "get_wheels")
+          return `${q.progress}/${q.target} · gold beams on map`;
+        if (q.id === "slime_outpost") {
+          const left = this.world.objects.filter(
+            (o) => o.alive && o.tag === "generator",
+          );
+          let nearest = Infinity;
+          for (const g of left) {
+            nearest = Math.min(
+              nearest,
+              Math.hypot(g.x - this.player.x, g.z - this.player.z),
+            );
+          }
+          const nearTxt =
+            left.length && Number.isFinite(nearest)
+              ? ` · nearest ${Math.round(nearest)}m`
+              : "";
+          return `${q.progress}/${q.target} gens · magenta beams${nearTxt}`;
+        }
+        return `${q.progress}/${q.target}`;
+      })(),
       announce: this.announce,
       dialogue: this.dialogue ? this.dialogue.lines[this.dialogue.i]! : null,
       dialogueSpeaker: this.dialogue?.speaker ?? null,

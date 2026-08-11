@@ -47,7 +47,7 @@ export const QUESTS: Record<QuestId, QuestDef> = {
     chapter: 2,
     blurb:
       "A fortified ooze camp pumps korus into the sky. Blow the generators.",
-    objective: "Destroy 3 Outpost Generators (purple cores)",
+    objective: "Destroy 3 purple generators — follow the magenta sky beams / map dots",
     rewardXp: 120,
     rewardScrap: 60,
   },
@@ -142,7 +142,7 @@ export const STORY_BEATS: Record<string, { speaker: string; lines: string[] }> =
     outpost: {
       speaker: "MYSTERY RADIO",
       lines: [
-        "Generators are singing. Smash the purple cores. Don't breathe the purple.",
+        "Three MAGENTA sky-beams on the ridge — those are the generators. Smash the purple cores. Don't breathe the purple.",
       ],
     },
     pete: {
