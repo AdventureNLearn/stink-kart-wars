@@ -899,6 +899,42 @@ export class KartEngine {
         const ring = o.mesh.getObjectByName("scrapRing");
         if (ring) ring.rotation.z += dt * 2.2;
       }
+      // Pulse sky beams on quest props (scrap / generators / korus)
+      if (
+        o.kind === "scrap" ||
+        o.kind === "generator" ||
+        o.kind === "korus_core"
+      ) {
+        const t = performance.now() * 0.003;
+        const pulse = 0.85 + Math.sin(t + o.x * 0.1) * 0.15;
+        o.mesh.traverse((ch) => {
+          if (
+            ch.name === "skyBeam" ||
+            ch.name === "skyBeamCore" ||
+            ch.name === "skyBeamCap" ||
+            ch.name === "skyBeamFlare"
+          ) {
+            ch.scale.setScalar(
+              ch.name === "skyBeam" || ch.name === "skyBeamCore"
+                ? 1
+                : pulse,
+            );
+            if (ch.name === "skyBeam" || ch.name === "skyBeamCore") {
+              ch.scale.set(pulse, 1, pulse);
+            }
+            const mat = (ch as THREE.Mesh).material as THREE.MeshBasicMaterial;
+            if (mat && "opacity" in mat) {
+              const base =
+                ch.name === "skyBeamCore"
+                  ? 0.65
+                  : ch.name === "skyBeam"
+                    ? 0.4
+                    : 0.5;
+              mat.opacity = base * (0.75 + pulse * 0.35);
+            }
+          }
+        });
+      }
     }
 
     // ambient battlefield explosions far away
@@ -1164,7 +1200,7 @@ export class KartEngine {
       if (!o.alive || o.kind !== "scrap") continue;
       // Generous radius during get_wheels so the 3rd cache always feels fair
       const onScrapQuest = this.activeQuest()?.id === "get_wheels";
-      const pickR = onScrapQuest ? 5.2 : 3.8;
+      const pickR = onScrapQuest ? 6.0 : 4.2;
       if (Math.hypot(o.x - p.x, o.z - p.z) < pickR) {
         o.alive = false;
         o.mesh.visible = false;
@@ -2080,21 +2116,55 @@ export class KartEngine {
       ctx.arc(tx(lm.x), ty(lm.z), 5, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Quest scrap caches — gold blips so the 3rd is never lost
-    const scrapQuest = this.activeQuest()?.id === "get_wheels";
+    // Quest objectives on minimap when in range (or during the matching quest)
+    const q = this.activeQuest();
+    const MAP_RANGE = 155; // world units — reasonable scout range
+    const pulse = 0.55 + Math.sin(performance.now() * 0.008) * 0.45;
     for (const o of this.world.objects) {
-      if (!o.alive || o.kind !== "scrap") continue;
-      if (!scrapQuest && o.tag !== "scrap_cache_quest") continue;
-      ctx.fillStyle = "#ffcc33";
-      ctx.beginPath();
-      ctx.arc(tx(o.x), ty(o.z), scrapQuest ? 4 : 3, 0, Math.PI * 2);
-      ctx.fill();
-      if (scrapQuest) {
-        ctx.strokeStyle = "#fff6a0";
-        ctx.lineWidth = 1;
-        ctx.stroke();
+      if (!o.alive) continue;
+      const dist = Math.hypot(o.x - this.player.x, o.z - this.player.z);
+      const inRange = dist < MAP_RANGE;
+
+      let color: string | null = null;
+      let radius = 3;
+      if (o.kind === "scrap") {
+        const scrapQuest = q?.id === "get_wheels";
+        if (scrapQuest || inRange) {
+          color = "#ffcc33";
+          radius = scrapQuest ? 5 : 4;
+        }
+      } else if (o.tag === "generator") {
+        if (q?.id === "slime_outpost" || inRange) {
+          color = "#c084fc";
+          radius = 4;
+        }
+      } else if (o.tag === "korus_core") {
+        if (q?.id === "korus_core" || inRange) {
+          color = "#22d3ee";
+          radius = 5;
+        }
+      } else if (o.tag === "quest_beacon" && (q?.id === "wake_up" || inRange)) {
+        color = "#3dcc5a";
+        radius = 4;
       }
+      if (!color) continue;
+
+      const px = tx(o.x);
+      const pz = ty(o.z);
+      // Outer pulse ring
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.35 + pulse * 0.4;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, pz, radius + 3 + pulse * 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, pz, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
+    // legacy scrap-only block removed — covered above
     for (const e of this.enemies) {
       if (!e.alive) continue;
       ctx.fillStyle = e.isBoss

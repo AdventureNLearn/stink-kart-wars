@@ -27,7 +27,7 @@ export const QUESTS: Record<QuestId, QuestDef> = {
     chapter: 1,
     blurb:
       "Coach Blorp wires boosters into your kart. 'World's ending. Try not to die cute.'",
-    objective: "Collect 3 glowing Scrap Caches near the beacon (gold on minimap)",
+    objective: "Collect 3 Scrap Caches — follow the gold sky beams near the beacon",
     rewardXp: 60,
     rewardScrap: 25,
   },
@@ -130,7 +130,7 @@ export const STORY_BEATS: Record<string, { speaker: string; lines: string[] }> =
     beacon: {
       speaker: "COACH BLORP",
       lines: [
-        "Beacon's hot. Grab scrap — three caches. Then we put teeth on this ride.",
+        "Beacon's hot. Three gold sky-beams around you — drive into each scrap cache. Then we put teeth on this ride.",
       ],
     },
     scrap_done: {

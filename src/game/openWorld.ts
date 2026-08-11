@@ -254,13 +254,82 @@ function groundAt(x: number, z: number, lift = 0): number {
   return terrainHeight(x, z) + lift;
 }
 
-/** Quest scrap cache — glowing crate + beacon so it never "disappears" into terrain. */
+/**
+ * Sky light column — readable across the wastes so quest props are never lost.
+ * Additive, no shadows.
+ */
+function addSkyBeam(parent: THREE.Object3D, color: number, height = 52): void {
+  const beamMat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 2.6, height, 14, 1, true),
+    beamMat,
+  );
+  beam.position.y = height * 0.5 + 0.5;
+  beam.name = "skyBeam";
+  beam.renderOrder = 2;
+  parent.add(beam);
+
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16, 0.48, height, 8, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.65,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    }),
+  );
+  core.position.y = height * 0.5 + 0.5;
+  core.name = "skyBeamCore";
+  core.renderOrder = 3;
+  parent.add(core);
+
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(1.2, 10, 10),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+  cap.position.y = height + 0.7;
+  cap.name = "skyBeamCap";
+  parent.add(cap);
+
+  const flare = new THREE.Mesh(
+    new THREE.CircleGeometry(3.0, 20),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    }),
+  );
+  flare.rotation.x = -Math.PI / 2;
+  flare.position.y = 0.1;
+  flare.name = "skyBeamFlare";
+  parent.add(flare);
+}
+
+/** Quest scrap cache — crate + sky beam so it can never hide in the hills. */
 function createScrapCacheMesh(questCritical: boolean): THREE.Group {
   const g = new THREE.Group();
   g.name = questCritical ? "ScrapCacheQuest" : "ScrapCache";
   const crateMat = mat(0xd4a020, {
     emissive: 0xaa7700,
-    emissiveIntensity: questCritical ? 0.85 : 0.45,
+    emissiveIntensity: questCritical ? 1.05 : 0.55,
     metalness: 0.55,
     roughness: 0.4,
   });
@@ -269,34 +338,41 @@ function createScrapCacheMesh(questCritical: boolean): THREE.Group {
   crate.castShadow = true;
   crate.receiveShadow = true;
   g.add(crate);
-  // Lid
   const lid = new THREE.Mesh(
     new THREE.BoxGeometry(1.7, 0.18, 1.7),
-    mat(0xf0c040, { emissive: 0xcc8800, emissiveIntensity: 0.5, metalness: 0.4 }),
+    mat(0xf0c040, {
+      emissive: 0xcc8800,
+      emissiveIntensity: 0.65,
+      metalness: 0.4,
+    }),
   );
   lid.position.y = 1.22;
   g.add(lid);
-  // Vertical beacon spike so caches read at distance
   const spike = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.18, questCritical ? 4.2 : 2.4, 8),
+    new THREE.CylinderGeometry(0.14, 0.2, 1.8, 8),
     mat(0xffcc33, {
       emissive: 0xffaa00,
-      emissiveIntensity: questCritical ? 1.2 : 0.6,
+      emissiveIntensity: 1.5,
       metalness: 0.3,
     }),
   );
-  spike.position.y = questCritical ? 3.2 : 2.2;
+  spike.position.y = 2.1;
   spike.name = "scrapBeacon";
   g.add(spike);
-  // Halo ring
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(1.1, 0.08, 6, 20),
-    mat(0xffdd55, { emissive: 0xffaa00, emissiveIntensity: 0.9, transparent: true, opacity: 0.85 }),
+    new THREE.TorusGeometry(1.25, 0.1, 6, 22),
+    mat(0xffdd55, {
+      emissive: 0xffaa00,
+      emissiveIntensity: 1.15,
+      transparent: true,
+      opacity: 0.92,
+    }),
   );
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.15;
   ring.name = "scrapRing";
   g.add(ring);
+  addSkyBeam(g, questCritical ? 0xffcc33 : 0xddaa44, questCritical ? 58 : 38);
   return g;
 }
 
@@ -759,6 +835,11 @@ export function buildOpenWorld(
     const g = new THREE.Group();
     g.add(base);
     g.add(core);
+    // Purple sky beam at generator world position
+    const beamRoot = new THREE.Group();
+    beamRoot.position.set(gx, terrainHeight(gx, gz), gz);
+    addSkyBeam(beamRoot, 0xa855f7, 48);
+    g.add(beamRoot);
     // emplaced artillery nearby
     const art = createArtilleryMesh();
     art.position.set(gx + 8, terrainHeight(gx + 8, gz + 4), gz + 4);
@@ -824,7 +905,11 @@ export function buildOpenWorld(
         opacity: 0.9,
       }),
     );
-    core.position.set(kx, y, kz);
+    core.position.set(0, 0, 0);
+    const coreGroup = new THREE.Group();
+    coreGroup.add(core);
+    addSkyBeam(coreGroup, 0x22d3ee, 62);
+    coreGroup.position.set(kx, y, kz);
     pushObj({
       kind: "korus_core",
       x: kx,
@@ -836,7 +921,7 @@ export function buildOpenWorld(
       solid: true,
       radius: 4.5,
       aabb: aabbFromCenter(kx, y, kz, 3.5, 4.5, 3.5),
-      mesh: core,
+      mesh: coreGroup,
       tag: "korus_core",
     });
     for (let i = 0; i < 12; i++) {
