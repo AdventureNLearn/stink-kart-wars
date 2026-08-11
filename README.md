@@ -20,7 +20,7 @@ Open **http://localhost:8080**
 | **Q** | Stink Cloud |
 | **E** | Ooze Overdrive |
 | **R** | Sprint |
-| **Space** | Hop |
+| **Space** | Jump / stomp |
 | **Esc** | Pause |
 
 Mobile: on-screen stick + action buttons.
@@ -52,3 +52,7 @@ npm run preview   # serves production build on :8080
 ## License
 
 Private project — all rights reserved unless you add a license.
+
+## Handoff (for AI / new sessions)
+
+Read **[HANDOFF.md](./HANDOFF.md)** before changing the game. It lists durable features, known gaps, verify commands, and publish rules. Sandbox sessions wipe uncommitted work — push early.
