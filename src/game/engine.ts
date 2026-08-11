@@ -469,17 +469,20 @@ export class KartEngine {
     const raiderHubs: [number, number, EnemyKind, number][] = [
       [55, 55, "slime_raider", 5],
       [140, 70, "slime_raider", 4],
-      [-100, 30, "bandit_kart", 4],
-      [80, -90, "bandit_kart", 4],
+      // Pete's Garage bandit patrol (rescue_bandana) — tight on the garage
+      [-110, 55, "bandit_kart", 5],
+      [80, -90, "bandit_kart", 3],
       [200, -40, "korus_drone", 5],
       [-40, -90, "slime_raider", 3],
-      [160, 140, "bandit_kart", 3],
+      [160, 140, "bandit_kart", 2],
       [-70, 100, "korus_drone", 3],
       [30, 160, "slime_raider", 3],
       [220, 80, "korus_drone", 3],
     ];
     for (const [hx, hz, kind, n] of raiderHubs) {
-      for (let i = 0; i < n; i++) tryPlace(kind, hx, hz, 55);
+      // Keep Pete's garage patrol tight on the garage pad
+      const jitter = hx === -110 && hz === 55 ? 22 : 55;
+      for (let i = 0; i < n; i++) tryPlace(kind, hx, hz, jitter);
     }
 
     // Tanks — sparse ring, not stacked on hubs
@@ -908,14 +911,25 @@ export class KartEngine {
         const ring = o.mesh.getObjectByName("scrapRing");
         if (ring) ring.rotation.z += dt * 2.2;
       }
-      // Pulse sky beams on quest props (scrap / generators / korus)
+      // Pulse sky beams on quest props (scrap / generators / korus / pete)
       if (
         o.kind === "scrap" ||
         o.kind === "generator" ||
-        o.kind === "korus_core"
+        o.kind === "korus_core" ||
+        o.tag === "pete_marker"
       ) {
+        const aq = this.activeQuest();
+        // Beam intensity follows whether this prop is the ACTIVE quest target
+        let relevant = false;
+        if (o.kind === "scrap") relevant = aq?.id === "get_wheels";
+        else if (o.kind === "generator") relevant = aq?.id === "slime_outpost";
+        else if (o.kind === "korus_core") relevant = aq?.id === "korus_core";
+        else if (o.tag === "pete_marker") relevant = aq?.id === "rescue_bandana";
+
         const t = performance.now() * 0.003;
-        const pulse = 0.85 + Math.sin(t + o.x * 0.1) * 0.15;
+        const pulse = relevant
+          ? 0.9 + Math.sin(t + o.x * 0.1) * 0.2
+          : 0.35 + Math.sin(t * 0.5) * 0.05;
         o.mesh.traverse((ch) => {
           if (
             ch.name === "skyBeam" ||
@@ -923,13 +937,10 @@ export class KartEngine {
             ch.name === "skyBeamCap" ||
             ch.name === "skyBeamFlare"
           ) {
-            ch.scale.setScalar(
-              ch.name === "skyBeam" || ch.name === "skyBeamCore"
-                ? 1
-                : pulse,
-            );
             if (ch.name === "skyBeam" || ch.name === "skyBeamCore") {
               ch.scale.set(pulse, 1, pulse);
+            } else {
+              ch.scale.setScalar(pulse);
             }
             const mat = (ch as THREE.Mesh).material as THREE.MeshBasicMaterial;
             if (mat && "opacity" in mat) {
@@ -939,8 +950,12 @@ export class KartEngine {
                   : ch.name === "skyBeam"
                     ? 0.4
                     : 0.5;
-              mat.opacity = base * (0.75 + pulse * 0.35);
+              // Full power on active quest target; faint otherwise
+              mat.opacity = relevant
+                ? base * (0.85 + pulse * 0.25)
+                : base * 0.18;
             }
+            ch.visible = true;
           }
         });
       }
@@ -2121,7 +2136,6 @@ export class KartEngine {
     const h = c.height;
     ctx.fillStyle = "#0a1018";
     ctx.fillRect(0, 0, w, h);
-    // Zoomed out so outpost generators stay readable
     const scale = 0.2;
     const cx = w / 2;
     const cy = h / 2;
@@ -2136,98 +2150,113 @@ export class KartEngine {
     };
     const tx = (x: number) => cx + (x - this.player.x) * scale;
     const ty = (z: number) => cy + (z - this.player.z) * scale;
+    const pulse = 0.55 + Math.sin(performance.now() * 0.008) * 0.45;
+    const q = this.activeQuest();
 
+    // Dim landmark ghosts only (context) — never look like active objectives
     for (const lm of this.world.landmarks) {
       const p = clampEdge(tx(lm.x), ty(lm.z));
-      ctx.fillStyle =
-        lm.id === "throne"
-          ? "#ff224488"
-          : lm.id === "outpost"
-            ? "#e879f988"
-            : "#22d3ee88";
+      ctx.fillStyle = "#1e293b99";
       ctx.beginPath();
-      ctx.arc(p.x, p.y, lm.id === "outpost" ? 6 : 5, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Quest objectives — edge-clamped so far targets still show as chevrons
-    const q = this.activeQuest();
-    const MAP_RANGE = 220;
-    const pulse = 0.55 + Math.sin(performance.now() * 0.008) * 0.45;
-    for (const o of this.world.objects) {
-      if (!o.alive) continue;
-      const dist = Math.hypot(o.x - this.player.x, o.z - this.player.z);
-      const inRange = dist < MAP_RANGE;
+    type Mark = { x: number; z: number; color: string; radius: number };
+    const marks: Mark[] = [];
 
-      let color: string | null = null;
-      let radius = 3;
-      if (o.kind === "scrap") {
-        const scrapQuest = q?.id === "get_wheels";
-        if (scrapQuest || inRange) {
-          color = "#ffcc33";
-          radius = scrapQuest ? 5 : 4;
-        }
-      } else if (o.tag === "generator") {
-        // Always on-map during Torch the Outpost
-        if (q?.id === "slime_outpost" || inRange) {
-          color = "#e879f9";
-          radius = q?.id === "slime_outpost" ? 6 : 4;
-        }
-      } else if (o.tag === "korus_core") {
-        if (q?.id === "korus_core" || inRange) {
-          color = "#22d3ee";
-          radius = 5;
-        }
-      } else if (
-        o.tag === "quest_beacon" &&
-        (q?.id === "wake_up" || inRange)
-      ) {
-        color = "#3dcc5a";
-        radius = 4;
+    // Active-quest objectives ONLY — cleared when that quest completes
+    if (q?.id === "wake_up") {
+      marks.push({ x: 0, z: 95, color: "#3dcc5a", radius: 6 });
+    }
+    if (q?.id === "get_wheels") {
+      for (const o of this.world.objects) {
+        if (!o.alive || o.kind !== "scrap") continue;
+        marks.push({ x: o.x, z: o.z, color: "#ffcc33", radius: 5 });
       }
-      if (!color) continue;
+    }
+    if (q?.id === "first_blood") {
+      for (const e of this.enemies) {
+        if (!e.alive || e.isBoss) continue;
+        if (
+          e.kind === "slime_raider" ||
+          e.kind === "bandit_kart" ||
+          e.kind === "tank"
+        ) {
+          const d = Math.hypot(e.x - this.player.x, e.z - this.player.z);
+          if (d < 180)
+            marks.push({ x: e.x, z: e.z, color: "#ef4444", radius: 3 });
+        }
+      }
+    }
+    if (q?.id === "slime_outpost") {
+      for (const o of this.world.objects) {
+        if (!o.alive || o.tag !== "generator") continue;
+        marks.push({ x: o.x, z: o.z, color: "#e879f9", radius: 6 });
+      }
+      if (!marks.length)
+        marks.push({ x: 130, z: 50, color: "#e879f9", radius: 5 });
+    }
+    if (q?.id === "rescue_bandana") {
+      // Pete's Garage — primary waypoint
+      marks.push({ x: -110, z: 55, color: "#38bdf8", radius: 7 });
+      for (const e of this.enemies) {
+        if (!e.alive || e.kind !== "bandit_kart") continue;
+        if (Math.hypot(e.x + 110, e.z - 55) < 70) {
+          marks.push({ x: e.x, z: e.z, color: "#f97316", radius: 4 });
+        }
+      }
+    }
+    if (q?.id === "korus_core") {
+      for (const o of this.world.objects) {
+        if (!o.alive || o.tag !== "korus_core") continue;
+        marks.push({ x: o.x, z: o.z, color: "#22d3ee", radius: 6 });
+      }
+      if (!marks.length)
+        marks.push({ x: 210, z: -35, color: "#22d3ee", radius: 6 });
+    }
+    if (q?.id === "reek_throne") {
+      marks.push({ x: 190, z: 175, color: "#ff2244", radius: 7 });
+      if (this.boss?.alive) {
+        marks.push({
+          x: this.boss.x,
+          z: this.boss.z,
+          color: "#ff0044",
+          radius: 5,
+        });
+      }
+    }
 
-      const p = clampEdge(tx(o.x), ty(o.z));
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.4 + pulse * 0.5;
+    for (const m of marks) {
+      const p = clampEdge(tx(m.x), ty(m.z));
+      ctx.strokeStyle = m.color;
+      ctx.globalAlpha = 0.45 + pulse * 0.5;
       ctx.lineWidth = p.out ? 3 : 2;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, radius + 3 + pulse * 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, m.radius + 2 + pulse * 2, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
-      ctx.fillStyle = color;
+      ctx.fillStyle = m.color;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, m.radius, 0, Math.PI * 2);
       ctx.fill();
       if (p.out) {
-        const ang = Math.atan2(ty(o.z) - cy, tx(o.x) - cx);
+        const ang = Math.atan2(ty(m.z) - cy, tx(m.x) - cx);
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(ang);
-        ctx.fillStyle = color;
+        ctx.fillStyle = m.color;
         ctx.beginPath();
-        ctx.moveTo(7, 0);
-        ctx.lineTo(-4, 5);
-        ctx.lineTo(-4, -5);
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-5, 5);
+        ctx.lineTo(-5, -5);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
       }
     }
 
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
-      const p = clampEdge(tx(e.x), ty(e.z));
-      if (p.out && !e.isBoss) continue;
-      ctx.fillStyle = e.isBoss
-        ? "#ff2244"
-        : e.kind === "tank"
-          ? "#ff8844"
-          : e.kind === "artillery"
-            ? "#ffaa00"
-            : "#e11d2e";
-      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
-    }
+    // Player
     ctx.fillStyle = "#3dcc5a";
     ctx.beginPath();
     ctx.arc(cx, cy, 4, 0, Math.PI * 2);
@@ -2235,6 +2264,7 @@ export class KartEngine {
     const fx = -Math.sin(this.player.yaw) * 8;
     const fz = -Math.cos(this.player.yaw) * 8;
     ctx.strokeStyle = "#8dff9e";
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + fx * scale * 3, cy + fz * scale * 3);
@@ -2281,6 +2311,36 @@ export class KartEngine {
               ? ` · nearest ${Math.round(nearest)}m`
               : "";
           return `${q.progress}/${q.target} gens · magenta beams${nearTxt}`;
+        }
+        if (q.id === "rescue_bandana") {
+          const dist = Math.round(
+            Math.hypot(this.player.x + 110, this.player.z - 55),
+          );
+          const bandits = this.enemies.filter(
+            (e) =>
+              e.alive &&
+              e.kind === "bandit_kart" &&
+              Math.hypot(e.x + 110, e.z - 55) < 70,
+          ).length;
+          return `Pete's Garage ${dist}m west · ${bandits} bandits`;
+        }
+        if (q.id === "wake_up") {
+          const dist = Math.round(
+            Math.hypot(this.player.x - 0, this.player.z - 95),
+          );
+          return `Scrap Beacon ${dist}m north`;
+        }
+        if (q.id === "korus_core") {
+          const dist = Math.round(
+            Math.hypot(this.player.x - 210, this.player.z + 35),
+          );
+          return `Korus Canyon ${dist}m · cyan beam`;
+        }
+        if (q.id === "reek_throne") {
+          const dist = Math.round(
+            Math.hypot(this.player.x - 190, this.player.z - 175),
+          );
+          return `Throne Mesa ${dist}m · red mark`;
         }
         return `${q.progress}/${q.target}`;
       })(),

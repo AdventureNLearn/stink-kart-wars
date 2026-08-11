@@ -57,7 +57,7 @@ export const QUESTS: Record<QuestId, QuestDef> = {
     chapter: 3,
     blurb:
       "Bandit Karts cornered Pilgrim Pete — last true bandana tailor in the wastes.",
-    objective: "Reach Pete's Garage and wipe the Bandit patrol",
+    objective: "Drive WEST to Pete's Garage (cyan sky beam) and wipe the Bandit patrol",
     rewardXp: 150,
     rewardScrap: 80,
   },
@@ -148,7 +148,7 @@ export const STORY_BEATS: Record<string, { speaker: string; lines: string[] }> =
     pete: {
       speaker: "PILGRIM PETE",
       lines: [
-        "They tried to take my bandana stock. Sacrilege! Clear the bandits and I'll stitch you a legend.",
+        "You found the cyan beam — that's my garage, kid. Clear the orange bandits on the map and I'll stitch you a legend.",
       ],
     },
     core: {

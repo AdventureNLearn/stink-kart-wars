@@ -760,13 +760,13 @@ export function buildOpenWorld(
     }
   }
 
-  // ── Slime Bastion Castle (west) ──
+  // ── Pete's Garage / Slime Bastion (west) ──
   {
     const cx = -110;
     const cz = 55;
     landmarks.push({
       id: "garage",
-      name: "Slime Bastion",
+      name: "Pete's Garage",
       x: cx,
       z: cz,
       radius: 55,
@@ -775,8 +775,58 @@ export function buildOpenWorld(
     addCastleFoundation(group, cx, cz, y, 24, "slime");
     const castle = createCastleMesh(0.85, "slime");
     castle.position.set(cx, y, cz);
+
+    // Quest marker group — sky beam + garage sign so Pete is never lost
+    const peteMark = new THREE.Group();
+    peteMark.name = "PetesGarageMarker";
+    peteMark.position.set(cx, y, cz);
+    addSkyBeam(peteMark, 0x38bdf8, 64);
+    // "garage pad" glow disc
+    const pad = new THREE.Mesh(
+      new THREE.CircleGeometry(6, 24),
+      new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.15;
+    pad.name = "skyBeamFlare";
+    peteMark.add(pad);
+    // Sign post
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(0.35, 5.5, 0.35),
+      mat(0x4a5568, { metalness: 0.4 }),
+    );
+    post.position.set(10, 2.75, 8);
+    peteMark.add(post);
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(5.2, 1.6, 0.25),
+      mat(0xe11d2e, {
+        emissive: 0xe11d2e,
+        emissiveIntensity: 0.7,
+        metalness: 0.2,
+      }),
+    );
+    sign.position.set(10, 5.4, 8);
+    sign.name = "peteSign";
+    peteMark.add(sign);
+    // cyan banner strip
+    const banner = new THREE.Mesh(
+      new THREE.BoxGeometry(4.6, 0.35, 0.28),
+      mat(0x38bdf8, { emissive: 0x38bdf8, emissiveIntensity: 0.9 }),
+    );
+    banner.position.set(10, 4.5, 8);
+    peteMark.add(banner);
+
+    group.add(peteMark);
+
     pushObj({
-      kind: "castle",
+      kind: "garage",
       x: cx,
       y: y + 6,
       z: cz,
@@ -788,6 +838,20 @@ export function buildOpenWorld(
       aabb: aabbFromCenter(cx, y + 6, cz, 20, 10, 20),
       mesh: castle,
       tag: "pete",
+    });
+    // Invisible quest target used for minimap + beam pulse (mesh is peteMark)
+    pushObj({
+      kind: "garage",
+      x: cx,
+      y: y + 2,
+      z: cz,
+      yaw: 0,
+      hp: 9999,
+      maxHp: 9999,
+      solid: false,
+      radius: 8,
+      mesh: peteMark,
+      tag: "pete_marker",
     });
   }
 
