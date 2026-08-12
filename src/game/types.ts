@@ -96,4 +96,4 @@ export const COLORS = {
   danger: 0xff3355,
 } as const;
 
-export const RIDE_HEIGHT = 0.55;
+export const RIDE_HEIGHT = 0.68;
