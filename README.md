@@ -47,11 +47,10 @@ npm run preview   # serves production build on :8080
 - **No secrets** are committed. Use `.env.example` as a template only.
 - Settings (keybinds, volume) store in **browser `localStorage`** only.
 - Do not commit `.env`, tokens, or deploy credentials.
-- Prefer a **private** remote if the campaign content is not public yet.
 
 ## License
 
-Private project — all rights reserved unless you add a license.
+No open-source license file is included yet; all rights reserved unless a license is added.
 
 ## Handoff (for AI / new sessions)
 
