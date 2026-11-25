@@ -50,7 +50,7 @@ npm run preview   # serves production build on :8080
 
 ## License
 
-No open-source license file is included yet; all rights reserved unless a license is added.
+MIT. See [LICENSE](LICENSE).
 
 ## Handoff (for AI / new sessions)
 
